@@ -1,0 +1,144 @@
+name: Resume Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      job_ad:
+        description: 'Job ad filename (without .txt) or "all"'
+        required: false
+        default: 'all'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  # ──────────────────────────────────────────────────────────
+  # Job 1: Validate JSON Resume schema
+  # ──────────────────────────────────────────────────────────
+  validate:
+    name: Validate Schema
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Build TypeScript
+        run: npm run build
+
+      - name: Validate base-resume.json schema
+        run: npx resume validate base-resume.json
+
+  # ──────────────────────────────────────────────────────────
+  # Job 2: Tailor + Render + Score
+  # ──────────────────────────────────────────────────────────
+  build:
+    name: Build Resumes
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Build TypeScript
+        run: npm run build
+
+      - name: Run full pipeline (all job ads)
+        run: node dist/pipeline.js --all
+
+      - name: Generate demo assets
+        run: node dist/generateDemo.js
+
+      - name: Upload output artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: resume-outputs
+          path: outputs/
+
+      - name: Upload docs artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-site
+          path: docs/
+
+  # ──────────────────────────────────────────────────────────
+  # Job 3: ATS Score Report (informational — never fails CI)
+  # ──────────────────────────────────────────────────────────
+  score-report:
+    name: ATS Score Report
+    needs: build
+    runs-on: ubuntu-latest
+    # continue-on-error ensures low scores never fail the build
+    continue-on-error: true
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: resume-outputs
+          path: outputs/
+
+      - name: Print ATS score summaries
+        run: |
+          echo "══════════════════════════════════════════"
+          echo " ATS Score Report"
+          echo "══════════════════════════════════════════"
+          for score_file in outputs/*/score.json; do
+            dir=$(dirname "$score_file")
+            job=$(basename "$dir")
+            match=$(jq -r '.matchScore' "$score_file")
+            ats=$(jq -r '.atsParsing' "$score_file")
+            missing=$(jq -r '.missingKeywords | join(", ")' "$score_file")
+            echo ""
+            echo "Job: $job"
+            echo "  Match Score:      ${match}%"
+            echo "  ATS Parsing:      $ats"
+            if [ -n "$missing" ] && [ "$missing" != "" ]; then
+              echo "  Missing Keywords: $missing"
+            fi
+          done
+          echo ""
+          echo "══════════════════════════════════════════"
+          echo "Note: Low match scores do NOT fail the build."
+
+  # ──────────────────────────────────────────────────────────
+  # Job 4: Deploy to GitHub Pages (optional)
+  # ──────────────────────────────────────────────────────────
+  deploy-pages:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: docs-site
+          path: docs/
+
+      - uses: actions/configure-pages@v4
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

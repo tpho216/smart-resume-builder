@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Jane Doe — Resume</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      color: #333;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 40px 24px;
+      line-height: 1.6;
+      font-size: 14px;
+    }
+    h1 { font-size: 2em; color: #1a1a1a; margin-bottom: 4px; }
+    h2 {
+      font-size: 1.15em;
+      color: #2563eb;
+      border-bottom: 2px solid #2563eb;
+      padding-bottom: 3px;
+      margin: 24px 0 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .subtitle { color: #555; font-size: 1.05em; margin-bottom: 6px; }
+    .contact-bar {
+      display: flex; flex-wrap: wrap; gap: 12px;
+      font-size: 0.88em; color: #555; margin-bottom: 6px;
+    }
+    .contact-bar a { color: #2563eb; text-decoration: none; }
+    .summary-text { margin-bottom: 4px; }
+    .section { margin-bottom: 8px; }
+    .entry { margin-bottom: 14px; }
+    .entry-header {
+      display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap;
+    }
+    .entry-summary { color: #555; margin: 2px 0; font-size: 0.93em; }
+    .date { color: #888; font-size: 0.88em; white-space: nowrap; }
+    .highlights { padding-left: 20px; margin-top: 4px; }
+    .highlights li, .highlights p { margin-bottom: 3px; font-size: 0.93em; }
+    .skills-grid {
+      display: flex; flex-wrap: wrap; gap: 10px;
+    }
+    .skill-group {
+      background: #f0f4ff; border-radius: 8px; padding: 8px 12px; min-width: 180px;
+    }
+    .skill-group strong { display: block; margin-bottom: 2px; font-size: 0.9em; }
+    .skill-group span { font-size: 0.85em; color: #555; }
+    .skills-inline div { margin-bottom: 4px; }
+    .inline-list { font-size: 0.93em; }
+    .entry-inline { margin-bottom: 4px; }
+    @media print { body { padding: 16px; font-size: 12px; } h2 { margin-top: 16px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Jane Doe</h1>
+    <div class="subtitle">Full-Stack Software Engineer | Product-focused, Architecture-minded</div>
+  </header>
+
+    <section class="section section-contact">
+      <div class="contact-bar">
+        <span>📧 jane.doe@example.com</span>
+        <span>📞 +61 400 000 000</span>
+        <span>🔗 <a href="https://janedoe.dev">https://janedoe.dev</a></span>
+        <span>📍 Sydney, NSW</span>
+        <span><a href="https://linkedin.com/in/janedoe">LinkedIn</a></span><span><a href="https://github.com/janedoe">GitHub</a></span>
+      </div>
+    </section>
+
+    <section class="section section-summary">
+      <h2>Summary</h2>
+      <p class="summary-text">Full-stack Software Engineer with 5+ years of experience designing and delivering scalable SaaS platforms, cloud-native microservices, and AI-assisted engineering workflows. Strong in React + TypeScript on the frontend and NestJS/Node.js on the backend, with hands-on AWS infrastructure deployment using Terraform. Experienced in building distributed systems, secure APIs, CI/CD pipelines, and production-ready cloud environments. Based in NSW.</p>
+    </section>
+
+    <section class="section section-skills">
+      <h2>Skills</h2>
+      <div class="skills-grid">
+        
+          <div class="skill-group">
+            <strong>Frontend</strong>
+            <span>React, TypeScript, JavaScript, Vite, Redux, React Native, PWAs, HTML5, CSS3, Responsive Design</span>
+          </div>
+        
+          <div class="skill-group">
+            <strong>Backend</strong>
+            <span>NestJS, Node.js, Express, FastAPI, Python, REST APIs, GraphQL, Microservices, WebSockets</span>
+          </div>
+        
+          <div class="skill-group">
+            <strong>Database & ORM</strong>
+            <span>PostgreSQL, MySQL, MongoDB, Redis, MikroORM, TypeORM, Prisma, Database Design, SQL</span>
+          </div>
+        
+          <div class="skill-group">
+            <strong>Cloud & DevOps</strong>
+            <span>AWS, Lambda, ECS, RDS, S3, IAM, Route53, CloudWatch, CloudFront, Azure, Terraform, Docker, Docker Compose, GitHub Actions, GitLab CI, CI/CD, Nginx</span>
+          </div>
+        
+          <div class="skill-group">
+            <strong>AI Workflow</strong>
+            <span>GitHub Copilot, Claude CLI, AI-assisted scaffolding, Prompt Engineering, AI Agent Orchestration, Refactoring, Code review</span>
+          </div>
+        
+          <div class="skill-group">
+            <strong>Testing</strong>
+            <span>Jest, Supertest, Cypress, Unit testing, Integration testing, E2E testing, CI quality gates, TDD</span>
+          </div>
+        
+          <div class="skill-group">
+            <strong>Architecture & Patterns</strong>
+            <span>Microservices, Event-driven architecture, Domain-Driven Design, RBAC, OAuth2, API Gateway, Modular monolith</span>
+          </div>
+        
+      </div>
+    </section>
+
+    <section class="section section-experience">
+      <h2>Experience</h2>
+      
+        <div class="entry">
+          <div class="entry-header">
+            <div>
+              <strong>Software Engineer</strong> — UTS Rapido
+            </div>
+            <span class="date">2020-01-01 – Present</span>
+          </div>
+          <p class="entry-summary">Progressed from Intern → Associate Software Engineer → Software Engineer. Worked across full-stack SaaS platforms, microservices architecture, cloud deployments, and interactive systems.</p>
+          <ul class="highlights"><li>Led backend service design, frontend development, AWS infrastructure provisioning, and CI/CD automation.</li><li>Designed and built React + TypeScript SPAs consumed by internal teams and external stakeholders.</li><li>Implemented NestJS microservices with modular architecture, dependency injection, and DTO validation.</li><li>Provisioned AWS infrastructure (ECS, RDS, S3, Lambda, Route53) using Terraform.</li><li>Built CI/CD pipelines with GitHub Actions and GitLab CI for automated build, test, and deployment.</li><li>Managed PostgreSQL databases with MikroORM and TypeORM across services.</li><li>Implemented RBAC, OAuth2 authentication, and secure API gateway patterns.</li><li>Wrote comprehensive unit, integration, and E2E tests with Jest and Supertest.</li></ul>
+        </div>
+      
+        <div class="entry">
+          <div class="entry-header">
+            <div>
+              <strong>Mobile Developer</strong> — OEM Digital
+            </div>
+            <span class="date">2019-04-01 – 2020-04-01</span>
+          </div>
+          <p class="entry-summary">Developed a native Android application connecting to vehicle OBD ports via Bluetooth.</p>
+          <ul class="highlights"><li>Implemented real-time diagnostic data streaming including RPM, velocity, and vehicle telemetry.</li><li>Built Bluetooth communication layer for OBD-II protocol support.</li><li>Designed reactive UI components for real-time data visualization.</li></ul>
+        </div>
+      
+        <div class="entry">
+          <div class="entry-header">
+            <div>
+              <strong>Software Engineering Intern</strong> — MPT AgTech
+            </div>
+            <span class="date">2019-01-01 – 2019-04-01</span>
+          </div>
+          <p class="entry-summary">Contributed to embedded software development for microcontroller systems.</p>
+          <ul class="highlights"><li>Assisted in hardware/software architecture design and control interface implementation.</li><li>Developed firmware communication protocols for sensor data acquisition.</li><li>Participated in design reviews and sprint planning.</li></ul>
+        </div>
+      
+    </section>
+
+    <section class="section section-projects">
+      <h2>Projects</h2>
+      
+        <div class="entry">
+          <div class="entry-header">
+            <strong>Marine VR Training Platform</strong>
+            <span class="date">2023-01-01 – 2024-12-01</span>
+          </div>
+          <p class="entry-summary">VR training system with private VPN VCS and LMS microservice</p>
+          <ul class="highlights"><li>Designed APIs to process and synchronise gameplay interaction data from streamed VR environments.</li><li>Built microservices responsible for session tracking, data ingestion, and result processing.</li><li>Configured secure Azure VPN infrastructure (Point-to-Site) with RADIUS authentication.</li><li>Documented network topology and system design for maintainability and auditability.</li></ul>
+        </div>
+      
+        <div class="entry">
+          <div class="entry-header">
+            <strong>Anti-Slavery Australia – My Blue Sky</strong>
+            <span class="date">2021-01-01 – 2023-01-01</span>
+          </div>
+          <p class="entry-summary">Full-stack web platform for anti-slavery advocacy</p>
+          <ul class="highlights"><li>Led full-stack development including cloud infrastructure provisioning and production deployment.</li><li>Built real-time chat functionality and secure OAuth2 integration with 3rd party CMS.</li><li>Integrated third-party APIs and headless CMS (Storyblok).</li><li>Secured AWS RDS within VPC.</li><li>Built CI/CD pipelines automating build, test, and deployment workflows.</li></ul>
+        </div>
+      
+        <div class="entry">
+          <div class="entry-header">
+            <strong>Genetic Health Community Support Platform</strong>
+            <span class="date">2025-01-01 – Present</span>
+          </div>
+          <p class="entry-summary">Multiplatform SaaS with admin portal and end-user interface</p>
+          <ul class="highlights"><li>Architecting and orchestrating multiple Claude AI agents across the full development lifecycle.</li><li>Designed skeleton and blueprint for AI agents encoding engineering best-practice guidelines.</li><li>Managing agent coordination across NestJS backend, React SPAs, CI/CD, and cloud infrastructure.</li><li>Delivering multiplatform application with admin/content portal and consumer-facing UI.</li></ul>
+        </div>
+      
+        <div class="entry">
+          <div class="entry-header">
+            <strong>Commercial Storage & Racking Solutions Platform</strong>
+            <span class="date">2025-06-01 – 2025-11-01</span>
+          </div>
+          <p class="entry-summary">Distributed NestJS microservices SaaS platform</p>
+          <ul class="highlights"><li>Designed distributed backend architecture of 3–4 cooperating NestJS microservices.</li><li>Built secure REST APIs supporting operational workflows and real-time data exchange.</li><li>Structured services using modular architecture, dependency injection, DTO validation, and RBAC.</li><li>Used MikroORM, TypeORM, and Prisma across services per performance/schema requirements.</li><li>Designed relational database schema supporting complex metadata relationships.</li><li>Implemented JSON Schema-driven dynamic form rendering.</li><li>Containerised services with Docker and deployed to AWS.</li><li>Provisioned infrastructure using Terraform with dev/staging/prod isolation.</li><li>Implemented comprehensive testing strategy using Jest + TypeScript with CI-integrated quality gates.</li></ul>
+        </div>
+      
+    </section>
+
+    <section class="section section-education">
+      <h2>Education</h2>
+      
+        <div class="entry">
+          <div class="entry-header">
+            <div>
+              <strong>Bachelor of Engineering (ICT) – Honours — Information and Communications Technology</strong>
+            </div>
+            <span class="date">2016-01-01 – 2020-12-01</span>
+          </div>
+          <p>University of Technology Sydney — GPA: 3.7/4.0</p>
+        </div>
+      
+    </section>
+
+    <section class="section section-certificates">
+      <h2>Certificates</h2>
+      
+    </section>
+
+    <section class="section section-languages">
+      <h2>Languages</h2>
+      <div class="inline-list">
+        <span>English (Native or bilingual proficiency)</span>
+      </div>
+    </section>
+</body>
+</html>

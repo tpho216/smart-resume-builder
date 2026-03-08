@@ -1,0 +1,50 @@
+{
+  "name": "resume-builder",
+  "version": "0.1.0",
+  "description": "AI-assisted JSON Resume pipeline — tailor, render, score, and theme-match resumes per job ad",
+  "main": "dist/tailorResume.js",
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "parse": "node dist/parseJobAd.js",
+    "tailor": "node dist/tailorResume.js",
+    "tailor:llm": "node dist/tailorResume.js --mode llm",
+    "llm:tailor": "node dist/llmTailorResume.js",
+    "render": "node dist/renderResume.js",
+    "score": "node dist/scoreResume.js",
+    "pipeline": "node dist/pipeline.js",
+    "validate": "resume validate base-resume.json",
+    "demo:generate": "node dist/generateDemo.js",
+    "upload": "node dist/parseUploadedResume.js",
+    "analyze": "node dist/analyzeStructure.js",
+    "theme:generate": "node dist/generateTheme.js",
+    "phase2": "node dist/phase2Pipeline.js"
+  },
+  "keywords": [
+    "resume",
+    "json-resume",
+    "ats",
+    "tailoring",
+    "cli",
+    "typescript"
+  ],
+  "author": "Peter Ho",
+  "license": "MIT",
+  "dependencies": {
+    "docx": "^9.6.0",
+    "dotenv": "^17.3.1",
+    "jsonresume-theme-elegant": "^1.16.1",
+    "mammoth": "^1.8.0",
+    "pdf-parse": "^1.1.1",
+    "puppeteer": "^24.38.0",
+    "resume-cli": "^3.0.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.29",
+    "tsx": "^4.21.0",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

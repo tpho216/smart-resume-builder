@@ -1,0 +1,49 @@
+[
+  {
+    "sampleName": "sample_resume",
+    "sampleFile": "sample_resume.txt",
+    "nameCandidate": "JANE SMITH",
+    "sectionOrder": [
+      "contact",
+      "summary",
+      "skills",
+      "experience",
+      "projects",
+      "education",
+      "certificates",
+      "languages"
+    ],
+    "layoutHints": {
+      "hasContactSection": false,
+      "hasSummarySection": true,
+      "experienceBeforeEducation": true,
+      "skillsEarly": true,
+      "totalSections": 8,
+      "detectedSections": 7,
+      "unknownSections": 1
+    }
+  },
+  {
+    "sampleName": "sample_resume_devops",
+    "sampleFile": "sample_resume_devops.txt",
+    "nameCandidate": "ALEX CHEN",
+    "sectionOrder": [
+      "contact",
+      "summary",
+      "skills",
+      "experience",
+      "education",
+      "certificates",
+      "awards"
+    ],
+    "layoutHints": {
+      "hasContactSection": false,
+      "hasSummarySection": true,
+      "experienceBeforeEducation": true,
+      "skillsEarly": true,
+      "totalSections": 7,
+      "detectedSections": 6,
+      "unknownSections": 1
+    }
+  }
+]

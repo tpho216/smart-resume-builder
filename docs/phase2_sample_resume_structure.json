@@ -1,0 +1,145 @@
+{
+  "nameCandidate": "JANE SMITH",
+  "sectionOrder": [
+    "summary",
+    "skills",
+    "experience",
+    "projects",
+    "education",
+    "certificates",
+    "languages"
+  ],
+  "sections": [
+    {
+      "heading": "JANE SMITH",
+      "sectionKey": "unknown",
+      "order": 0,
+      "paragraphIndex": 0,
+      "contentStyle": {
+        "type": "prose",
+        "lineCount": 3,
+        "bulletCount": 0,
+        "dateCount": 0,
+        "avgLineLength": 44,
+        "hasDates": false
+      },
+      "lineCount": 3
+    },
+    {
+      "heading": "SUMMARY:",
+      "sectionKey": "summary",
+      "order": 1,
+      "paragraphIndex": 4,
+      "contentStyle": {
+        "type": "paragraph",
+        "lineCount": 1,
+        "bulletCount": 0,
+        "dateCount": 0,
+        "avgLineLength": 183,
+        "hasDates": false
+      },
+      "lineCount": 1
+    },
+    {
+      "heading": "SKILLS:",
+      "sectionKey": "skills",
+      "order": 2,
+      "paragraphIndex": 6,
+      "contentStyle": {
+        "type": "list",
+        "lineCount": 7,
+        "bulletCount": 0,
+        "dateCount": 0,
+        "avgLineLength": 31,
+        "hasDates": false
+      },
+      "lineCount": 7
+    },
+    {
+      "heading": "EXPERIENCE:",
+      "sectionKey": "experience",
+      "order": 3,
+      "paragraphIndex": 14,
+      "contentStyle": {
+        "type": "bullets",
+        "lineCount": 20,
+        "bulletCount": 14,
+        "dateCount": 3,
+        "avgLineLength": 57,
+        "hasDates": true
+      },
+      "lineCount": 20
+    },
+    {
+      "heading": "PROJECTS:",
+      "sectionKey": "projects",
+      "order": 4,
+      "paragraphIndex": 35,
+      "contentStyle": {
+        "type": "bullets",
+        "lineCount": 8,
+        "bulletCount": 6,
+        "dateCount": 0,
+        "avgLineLength": 50,
+        "hasDates": false
+      },
+      "lineCount": 8
+    },
+    {
+      "heading": "EDUCATION:",
+      "sectionKey": "education",
+      "order": 5,
+      "paragraphIndex": 44,
+      "contentStyle": {
+        "type": "list",
+        "lineCount": 3,
+        "bulletCount": 0,
+        "dateCount": 1,
+        "avgLineLength": 33,
+        "hasDates": true
+      },
+      "lineCount": 3
+    },
+    {
+      "heading": "CERTIFICATIONS:",
+      "sectionKey": "certificates",
+      "order": 6,
+      "paragraphIndex": 48,
+      "contentStyle": {
+        "type": "prose",
+        "lineCount": 2,
+        "bulletCount": 0,
+        "dateCount": 2,
+        "avgLineLength": 50,
+        "hasDates": true
+      },
+      "lineCount": 2
+    },
+    {
+      "heading": "LANGUAGES:",
+      "sectionKey": "languages",
+      "order": 7,
+      "paragraphIndex": 51,
+      "contentStyle": {
+        "type": "prose",
+        "lineCount": 3,
+        "bulletCount": 0,
+        "dateCount": 0,
+        "avgLineLength": 55,
+        "hasDates": false
+      },
+      "lineCount": 3
+    }
+  ],
+  "headerBlock": null,
+  "layoutHints": {
+    "hasContactSection": false,
+    "hasSummarySection": true,
+    "experienceBeforeEducation": true,
+    "skillsEarly": true,
+    "totalSections": 8,
+    "detectedSections": 7,
+    "unknownSections": 1
+  },
+  "totalParagraphs": 55
+}

@@ -1,0 +1,129 @@
+{
+  "nameCandidate": "ALEX CHEN",
+  "sectionOrder": [
+    "summary",
+    "skills",
+    "experience",
+    "education",
+    "certificates",
+    "awards"
+  ],
+  "sections": [
+    {
+      "heading": "ALEX CHEN",
+      "sectionKey": "unknown",
+      "order": 0,
+      "paragraphIndex": 0,
+      "contentStyle": {
+        "type": "prose",
+        "lineCount": 3,
+        "bulletCount": 0,
+        "dateCount": 0,
+        "avgLineLength": 40,
+        "hasDates": false
+      },
+      "lineCount": 3
+    },
+    {
+      "heading": "PROFESSIONAL SUMMARY",
+      "sectionKey": "summary",
+      "order": 1,
+      "paragraphIndex": 4,
+      "contentStyle": {
+        "type": "paragraph",
+        "lineCount": 1,
+        "bulletCount": 0,
+        "dateCount": 0,
+        "avgLineLength": 217,
+        "hasDates": false
+      },
+      "lineCount": 1
+    },
+    {
+      "heading": "TECHNICAL SKILLS",
+      "sectionKey": "skills",
+      "order": 2,
+      "paragraphIndex": 6,
+      "contentStyle": {
+        "type": "prose",
+        "lineCount": 7,
+        "bulletCount": 0,
+        "dateCount": 0,
+        "avgLineLength": 55,
+        "hasDates": false
+      },
+      "lineCount": 7
+    },
+    {
+      "heading": "WORK EXPERIENCE",
+      "sectionKey": "experience",
+      "order": 3,
+      "paragraphIndex": 14,
+      "contentStyle": {
+        "type": "bullets",
+        "lineCount": 20,
+        "bulletCount": 14,
+        "dateCount": 3,
+        "avgLineLength": 53,
+        "hasDates": true
+      },
+      "lineCount": 20
+    },
+    {
+      "heading": "EDUCATION",
+      "sectionKey": "education",
+      "order": 4,
+      "paragraphIndex": 35,
+      "contentStyle": {
+        "type": "list",
+        "lineCount": 4,
+        "bulletCount": 0,
+        "dateCount": 2,
+        "avgLineLength": 39,
+        "hasDates": true
+      },
+      "lineCount": 4
+    },
+    {
+      "heading": "CERTIFICATIONS",
+      "sectionKey": "certificates",
+      "order": 5,
+      "paragraphIndex": 40,
+      "contentStyle": {
+        "type": "prose",
+        "lineCount": 3,
+        "bulletCount": 0,
+        "dateCount": 3,
+        "avgLineLength": 50,
+        "hasDates": true
+      },
+      "lineCount": 3
+    },
+    {
+      "heading": "AWARDS",
+      "sectionKey": "awards",
+      "order": 6,
+      "paragraphIndex": 44,
+      "contentStyle": {
+        "type": "prose",
+        "lineCount": 4,
+        "bulletCount": 0,
+        "dateCount": 2,
+        "avgLineLength": 56,
+        "hasDates": true
+      },
+      "lineCount": 4
+    }
+  ],
+  "headerBlock": null,
+  "layoutHints": {
+    "hasContactSection": false,
+    "hasSummarySection": true,
+    "experienceBeforeEducation": true,
+    "skillsEarly": true,
+    "totalSections": 7,
+    "detectedSections": 6,
+    "unknownSections": 1
+  },
+  "totalParagraphs": 49
+}

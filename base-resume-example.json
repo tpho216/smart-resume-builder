@@ -1,0 +1,239 @@
+{
+    "basics": {
+        "name": "Jane Doe",
+        "label": "Full-Stack Software Engineer",
+        "image": "",
+        "email": "jane.doe@example.com",
+        "phone": "+1 555 123 4567",
+        "url": "https://janedoe.dev",
+        "summary": "Full-stack Software Engineer with 5+ years of experience designing and delivering scalable SaaS platforms, cloud-native microservices, and modern web applications. Strong in React + TypeScript on the frontend and Node.js on the backend, with hands-on cloud infrastructure experience.",
+        "location": {
+            "address": "123 Main Street",
+            "postalCode": "10001",
+            "city": "New York",
+            "countryCode": "US",
+            "region": "NY"
+        },
+        "profiles": [
+            {
+                "network": "LinkedIn",
+                "username": "janedoe",
+                "url": "https://linkedin.com/in/janedoe"
+            },
+            {
+                "network": "GitHub",
+                "username": "janedoe",
+                "url": "https://github.com/janedoe"
+            }
+        ]
+    },
+    "work": [
+        {
+            "name": "Acme Corp",
+            "position": "Software Engineer",
+            "url": "https://www.acmecorp.example.com",
+            "startDate": "2021-03-01",
+            "endDate": "",
+            "summary": "Full-stack engineer working on SaaS platform development, microservices architecture, and cloud deployments.",
+            "highlights": [
+                "Led backend service design and frontend development for customer-facing dashboards.",
+                "Designed and built React + TypeScript SPAs consumed by internal teams and external stakeholders.",
+                "Implemented Node.js microservices with modular architecture and DTO validation.",
+                "Provisioned AWS infrastructure (ECS, RDS, S3) using Terraform.",
+                "Built CI/CD pipelines with GitHub Actions for automated build, test, and deployment.",
+                "Managed PostgreSQL databases across services.",
+                "Implemented RBAC and OAuth2 authentication.",
+                "Wrote comprehensive unit and integration tests with Jest."
+            ],
+            "_tags": [
+                "fullstack",
+                "backend",
+                "frontend",
+                "cloud",
+                "devops",
+                "testing"
+            ]
+        },
+        {
+            "name": "StartupXYZ",
+            "position": "Junior Developer",
+            "url": "",
+            "startDate": "2019-06-01",
+            "endDate": "2021-02-01",
+            "summary": "Developed features for a consumer mobile application and contributed to backend APIs.",
+            "highlights": [
+                "Built React Native mobile app screens and integrated REST APIs.",
+                "Implemented real-time notification system using WebSockets.",
+                "Contributed to database schema design and migration scripts."
+            ],
+            "_tags": [
+                "mobile",
+                "frontend",
+                "backend"
+            ]
+        }
+    ],
+    "volunteer": [],
+    "education": [
+        {
+            "institution": "State University",
+            "url": "https://www.stateuniversity.example.com",
+            "area": "Computer Science",
+            "studyType": "Bachelor of Science",
+            "startDate": "2015-09-01",
+            "endDate": "2019-05-01",
+            "score": "3.8/4.0",
+            "courses": []
+        }
+    ],
+    "awards": [
+        {
+            "title": "Dean's List",
+            "date": "2018-06-01",
+            "awarder": "State University",
+            "summary": "Recognized for academic excellence."
+        }
+    ],
+    "certificates": [],
+    "publications": [],
+    "skills": [
+        {
+            "name": "Frontend",
+            "level": "Advanced",
+            "keywords": [
+                "React",
+                "TypeScript",
+                "JavaScript",
+                "Vite",
+                "Redux",
+                "HTML5",
+                "CSS3",
+                "Responsive Design"
+            ]
+        },
+        {
+            "name": "Backend",
+            "level": "Advanced",
+            "keywords": [
+                "Node.js",
+                "Express",
+                "Python",
+                "REST APIs",
+                "GraphQL",
+                "Microservices"
+            ]
+        },
+        {
+            "name": "Database & ORM",
+            "level": "Intermediate",
+            "keywords": [
+                "PostgreSQL",
+                "MongoDB",
+                "Redis",
+                "Prisma",
+                "SQL"
+            ]
+        },
+        {
+            "name": "Cloud & DevOps",
+            "level": "Intermediate",
+            "keywords": [
+                "AWS",
+                "ECS",
+                "S3",
+                "Terraform",
+                "Docker",
+                "GitHub Actions",
+                "CI/CD"
+            ]
+        },
+        {
+            "name": "Testing",
+            "level": "Intermediate",
+            "keywords": [
+                "Jest",
+                "Cypress",
+                "Unit testing",
+                "Integration testing",
+                "E2E testing"
+            ]
+        }
+    ],
+    "languages": [
+        {
+            "language": "English",
+            "fluency": "Native"
+        }
+    ],
+    "interests": [],
+    "references": [
+        {
+            "name": "Available upon request",
+            "reference": ""
+        }
+    ],
+    "projects": [
+        {
+            "name": "E-Commerce Platform",
+            "description": "Full-stack e-commerce platform with real-time inventory management, payment processing, and admin dashboard.",
+            "startDate": "2022-01-01",
+            "endDate": "2023-06-01",
+            "url": "",
+            "highlights": [
+                "Designed scalable microservices architecture handling 10k+ concurrent users.",
+                "Implemented real-time inventory tracking with WebSocket notifications.",
+                "Built CI/CD pipeline with automated testing and staged deployments.",
+                "Delivered production system processing $2M+ in annual transactions."
+            ],
+            "keywords": [
+                "React",
+                "TypeScript",
+                "Node.js",
+                "PostgreSQL",
+                "Redis",
+                "AWS ECS",
+                "Docker",
+                "Terraform",
+                "Stripe",
+                "Jest"
+            ],
+            "_tags": [
+                "fullstack",
+                "backend",
+                "cloud",
+                "devops"
+            ]
+        },
+        {
+            "name": "Task Management App",
+            "description": "Cross-platform task management application with team collaboration features and real-time sync.",
+            "startDate": "2021-03-01",
+            "endDate": "2022-01-01",
+            "url": "",
+            "highlights": [
+                "Built React Native mobile app with offline-first architecture.",
+                "Implemented real-time sync using Firebase Realtime Database.",
+                "Designed role-based access control for team workspaces.",
+                "Achieved 4.5+ star rating on app stores with 10k+ downloads."
+            ],
+            "keywords": [
+                "React Native",
+                "TypeScript",
+                "Firebase",
+                "Redux",
+                "Expo",
+                "Node.js"
+            ],
+            "_tags": [
+                "mobile",
+                "fullstack",
+                "frontend"
+            ]
+        }
+    ],
+    "_meta": {
+        "version": "1.0.0",
+        "lastModified": "2026-01-01",
+        "note": "This is the superset base resume. Tailored resumes are generated by filtering relevant items per job ad."
+    }
+}

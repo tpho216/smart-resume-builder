@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.log
+.env
+
+# Personal resume data — not tracked (use base-resume-example.json as template)
+base-resume.json
+
+# Keep pre-generated demo outputs; ignore local dev outputs
+# outputs/ is tracked for demo purposes
+outputs/
+themes/
+
+job_ads/
