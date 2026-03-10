@@ -13,7 +13,7 @@
     "render": "node dist/renderResume.js",
     "score": "node dist/scoreResume.js",
     "pipeline": "node dist/pipeline.js",
-    "validate": "resume validate base-resume.json",
+    "validate": "resume validate -r base-resume.json",
     "demo:generate": "node dist/generateDemo.js",
     "upload": "node dist/parseUploadedResume.js",
     "analyze": "node dist/analyzeStructure.js",
