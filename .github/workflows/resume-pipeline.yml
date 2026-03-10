@@ -38,7 +38,7 @@ jobs:
         run: npm run build
 
       - name: Validate base-resume.json schema
-        run: npx resume validate -r base-resume.json
+        run: npx resume validate -r base-resume-example.json
 
   # ──────────────────────────────────────────────────────────
   # Job 2: Tailor + Render + Score
