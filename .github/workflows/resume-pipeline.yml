@@ -60,6 +60,9 @@ jobs:
       - name: Build TypeScript
         run: npm run build
 
+      - name: Use example resume as base (real resume is gitignored)
+        run: cp base-resume-example.json base-resume.json
+
       - name: Run full pipeline (all job ads)
         run: node dist/pipeline.js --all
 

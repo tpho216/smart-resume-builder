@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resume Builder — AI-Assisted Pipeline Demo</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-light: #dbeafe;
+            --success: #16a34a;
+            --success-light: #dcfce7;
+            --warning: #d97706;
+            --warning-light: #fef3c7;
+            --danger: #dc2626;
+            --danger-light: #fee2e2;
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --text: #1e293b;
+            --muted: #64748b;
+            --border: #e2e8f0;
+            --radius: 12px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+
+        /* Header */
+        .hero {
+            background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%);
+            color: white;
+            padding: 48px 24px;
+            text-align: center;
+        }
+
+        .hero h1 {
+            font-size: 2.2em;
+            margin-bottom: 8px;
+        }
+
+        .hero p {
+            font-size: 1.1em;
+            opacity: 0.9;
+            max-width: 700px;
+            margin: 0 auto;
+        }
+
+        /* Container */
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 32px 24px;
+        }
+
+        /* Notice banner */
+        .notice {
+            background: var(--primary-light);
+            border: 1px solid var(--primary);
+            border-radius: var(--radius);
+            padding: 16px 20px;
+            margin-bottom: 32px;
+            font-size: 0.95em;
+        }
+
+        .notice strong {
+            color: var(--primary);
+        }
+
+        /* Job selector */
+        .job-selector {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 28px;
+            flex-wrap: wrap;
+        }
+
+        .job-btn {
+            padding: 10px 20px;
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            background: var(--card);
+            cursor: pointer;
+            font-size: 0.95em;
+            font-weight: 500;
+            color: var(--text);
+            transition: all 0.2s;
+        }
+
+        .job-btn:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+
+        .job-btn.active {
+            border-color: var(--primary);
+            background: var(--primary);
+            color: white;
+        }
+
+        /* Panel grid */
+        .panels {
+            display: grid;
+            grid-template-columns: 1fr 340px;
+            gap: 24px;
+            align-items: start;
+        }
+
+        @media (max-width: 800px) {
+            .panels {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Card */
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+
+        .card-header {
+            padding: 14px 20px;
+            font-weight: 600;
+            font-size: 1em;
+            border-bottom: 1px solid var(--border);
+            background: #f8fafc;
+        }
+
+        .card-body {
+            padding: 20px;
+        }
+
+        /* Resume preview */
+        .resume-frame {
+            width: 100%;
+            height: 700px;
+            border: none;
+        }
+
+        /* Score panel */
+        .score-big {
+            text-align: center;
+            padding: 20px 0 12px;
+        }
+
+        .score-big .number {
+            font-size: 3em;
+            font-weight: 700;
+            line-height: 1;
+        }
+
+        .score-big .label {
+            font-size: 0.85em;
+            color: var(--muted);
+            margin-top: 4px;
+        }
+
+        .score-good .number {
+            color: var(--success);
+        }
+
+        .score-ok .number {
+            color: var(--warning);
+        }
+
+        .score-low .number {
+            color: var(--danger);
+        }
+
+        /* ATS badge */
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+
+        .badge-pass {
+            background: var(--success-light);
+            color: var(--success);
+        }
+
+        .badge-fail {
+            background: var(--danger-light);
+            color: var(--danger);
+        }
+
+        /* Keyword lists */
+        .kw-section {
+            margin-top: 16px;
+        }
+
+        .kw-section h4 {
+            font-size: 0.85em;
+            color: var(--muted);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .kw-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .kw-tag {
+            padding: 3px 10px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: 500;
+        }
+
+        .kw-matched {
+            background: var(--success-light);
+            color: var(--success);
+        }
+
+        .kw-missing {
+            background: var(--danger-light);
+            color: var(--danger);
+        }
+
+        /* Actions */
+        .actions {
+            margin-top: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 10px 16px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9em;
+            text-align: center;
+            transition: opacity 0.2s;
+        }
+
+        .btn:hover {
+            opacity: 0.85;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-outline {
+            background: white;
+            color: var(--primary);
+            border: 2px solid var(--primary);
+        }
+
+        /* Contact card */
+        .contact-card {
+            background: linear-gradient(135deg, #f0f4ff 0%, #e8f0fe 100%);
+            border: 1px solid var(--primary);
+            border-radius: var(--radius);
+            padding: 20px;
+            margin-top: 24px;
+            text-align: center;
+        }
+
+        .contact-card h3 {
+            color: var(--primary);
+            margin-bottom: 8px;
+            font-size: 1.05em;
+        }
+
+        .contact-card p {
+            font-size: 0.9em;
+            color: var(--muted);
+            margin-bottom: 12px;
+        }
+
+        .contact-card a {
+            color: var(--primary);
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            padding: 32px 24px;
+            color: var(--muted);
+            font-size: 0.85em;
+            border-top: 1px solid var(--border);
+            margin-top: 48px;
+        }
+
+        footer a {
+            color: var(--primary);
+            text-decoration: none;
+        }
+
+        /* Loading */
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: var(--muted);
+        }
+
+        /* Tabs */
+        .tab-bar {
+            display: flex;
+            gap: 0;
+            margin-bottom: 28px;
+            border-bottom: 2px solid var(--border);
+        }
+
+        .tab-btn {
+            padding: 12px 24px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 600;
+            color: var(--muted);
+            border-bottom: 3px solid transparent;
+            margin-bottom: -2px;
+            transition: all 0.2s;
+        }
+
+        .tab-btn:hover {
+            color: var(--primary);
+        }
+
+        .tab-btn.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+        }
+
+        .tab-panel {
+            display: none;
+        }
+
+        .tab-panel.active {
+            display: block;
+        }
+
+        /* Phase 2 structure panel */
+        .structure-flow {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+            margin: 12px 0;
+        }
+
+        .structure-flow .section-tag {
+            background: var(--primary-light);
+            color: var(--primary);
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+
+        .structure-flow .arrow {
+            color: var(--muted);
+            font-size: 0.85em;
+        }
+
+        .layout-hints {
+            margin-top: 12px;
+        }
+
+        .layout-hints div {
+            font-size: 0.9em;
+            margin-bottom: 4px;
+        }
+
+        .layout-hints .check {
+            color: var(--success);
+        }
+
+        .layout-hints .cross {
+            color: var(--danger);
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="hero">
+        <h1>Resume Builder</h1>
+        <p>AI-assisted JSON Resume pipeline — automatically tailor, render, score, and theme-match resumes for any job
+            ad.</p>
+    </div>
+
+    <div class="container">
+
+        <div class="notice">
+            <strong>Demo Notice:</strong> These are example outputs generated from <strong>dummy job ads</strong> and
+            <strong>sample resumes</strong> for demonstration purposes.
+            No real job applications are shown. For a live demo with your own job ad, please <a href="#contact">contact
+                us</a>.
+        </div>
+
+        <!-- Tabs -->
+        <div class="tab-bar">
+            <button class="tab-btn active" data-tab="phase1">Phase 1: Tailor &amp; Score</button>
+            <button class="tab-btn" data-tab="phase2">Phase 2: Structure &amp; Theme</button>
+        </div>
+
+        <!-- ============ PHASE 1 TAB ============ -->
+        <div id="tab-phase1" class="tab-panel active">
+
+            <!-- Job ad selector -->
+            <div id="job-selector" class="job-selector">
+                <div class="loading">Loading demo data...</div>
+            </div>
+
+            <!-- Main panel -->
+            <div class="panels">
+
+                <!-- Left: Resume preview -->
+                <div class="card">
+                    <div class="card-header" id="preview-header">Resume Preview</div>
+                    <div class="card-body" style="padding: 0;">
+                        <iframe id="resume-frame" class="resume-frame" title="Resume preview"></iframe>
+                    </div>
+                </div>
+
+                <!-- Right: Score + actions -->
+                <div>
+                    <!-- ATS Score -->
+                    <div class="card" id="score-card">
+                        <div class="card-header">ATS Match Score</div>
+                        <div class="card-body">
+                            <div class="score-big" id="score-display">
+                                <div class="number">—</div>
+                                <div class="label">Match Score</div>
+                            </div>
+
+                            <div style="text-align: center; margin: 8px 0;">
+                                <span>ATS Parsing: </span>
+                                <span id="ats-badge" class="badge">—</span>
+                            </div>
+
+                            <div class="kw-section" id="matched-section" style="display:none;">
+                                <h4>Matched Keywords</h4>
+                                <div class="kw-list" id="matched-keywords"></div>
+                            </div>
+
+                            <div class="kw-section" id="missing-section" style="display:none;">
+                                <h4>Missing Keywords</h4>
+                                <div class="kw-list" id="missing-keywords"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="actions">
+                        <a id="pdf-link" class="btn btn-primary" href="#" download>Download PDF</a>
+                        <a id="html-link" class="btn btn-outline" href="#" target="_blank">Open HTML in New Tab</a>
+                        <a id="json-link" class="btn btn-outline" href="#" target="_blank">View Tailored JSON</a>
+                    </div>
+                </div>
+            </div>
+        </div><!-- /phase1 -->
+
+        <!-- ============ PHASE 2 TAB ============ -->
+        <div id="tab-phase2" class="tab-panel">
+
+            <p style="margin-bottom: 16px; color: var(--muted);">
+                Upload a resume (PDF or DOCX) and the system analyzes its <strong>section structure and order</strong>,
+                then generates a matching JSON Resume theme. Below are pre-generated examples from sample resumes.
+            </p>
+
+            <!-- Sample selector -->
+            <div id="p2-selector" class="job-selector">
+                <div class="loading">Loading Phase 2 data...</div>
+            </div>
+
+            <div class="panels">
+                <!-- Left: Themed preview -->
+                <div class="card">
+                    <div class="card-header" id="p2-preview-header">Themed Resume Preview</div>
+                    <div class="card-body" style="padding: 0;">
+                        <iframe id="p2-frame" class="resume-frame" title="Themed resume preview"></iframe>
+                    </div>
+                </div>
+
+                <!-- Right: Structure analysis -->
+                <div>
+                    <div class="card">
+                        <div class="card-header">Structure Analysis</div>
+                        <div class="card-body">
+                            <div style="margin-bottom: 8px;">
+                                <strong>Detected name:</strong> <span id="p2-name">—</span>
+                            </div>
+
+                            <div>
+                                <strong>Section order:</strong>
+                                <div id="p2-sections" class="structure-flow"></div>
+                            </div>
+
+                            <div class="layout-hints" id="p2-hints"></div>
+                        </div>
+                    </div>
+
+                    <div class="card" style="margin-top: 16px;">
+                        <div class="card-header">How It Works</div>
+                        <div class="card-body" style="font-size: 0.9em; color: var(--muted);">
+                            <ol style="padding-left: 18px;">
+                                <li>Upload your existing resume (PDF/DOCX)</li>
+                                <li>Parser extracts text, paragraphs, and heading candidates</li>
+                                <li>Analyzer detects sections, order, and content styles</li>
+                                <li>Theme generator creates a JSON Resume theme matching your layout</li>
+                                <li>Your tailored resume is rendered with the new theme</li>
+                            </ol>
+                        </div>
+                    </div>
+
+                    <div class="actions" style="margin-top: 16px;">
+                        <a id="p2-html-link" class="btn btn-outline" href="#" target="_blank">Open Themed Preview</a>
+                        <a id="p2-structure-link" class="btn btn-outline" href="#" target="_blank">View Structure
+                            JSON</a>
+                    </div>
+                </div>
+            </div>
+        </div><!-- /phase2 -->
+
+        <!-- Contact -->
+        <div class="contact-card" id="contact">
+            <h3>Want a Custom Demo?</h3>
+            <p>Fork this repo to run the pipeline with your own job ads and resumes, or contact me for a personalized
+                live demo.</p>
+            <a href="https://github.com/janedoe/resume-builder" class="btn btn-outline" style="margin-bottom: 8px;">Fork
+                on GitHub</a>
+            <br>
+            <a href="mailto:jane.doe@example.com">jane.doe@example.com</a> ·
+            <a href="https://linkedin.com/in/janedoe" target="_blank">LinkedIn</a>
+        </div>
+
+    </div>
+
+    <footer>
+        Built by <a href="https://github.com/janedoe">Jane Doe</a> · Powered by <a href="https://jsonresume.org">JSON
+            Resume</a> · <a href="https://github.com/janedoe/resume-builder">Source on GitHub</a>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

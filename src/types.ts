@@ -306,6 +306,47 @@ export interface LlmConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Task config types  (replaces global config/llm-config.json)
+// ---------------------------------------------------------------------------
+
+/**
+ * A task file (inputs/tasks/task_<n>.json) bundles every setting needed to
+ * run one pipeline job.  CLI flags take precedence over anything set here.
+ */
+export interface TaskConfig {
+    /** Human-readable task number (matches filename suffix). */
+    task?: number;
+    /** Short description shown in CLI output. */
+    description?: string;
+
+    // ── Pipeline inputs ─────────────────────────────────────
+    /** Path to the base JSON Resume (relative to project root). */
+    baseResume?: string;
+    /**
+     * Job ad(s) to process.
+     *  - string path  → single job ad
+     *  - string[]     → multiple job ads
+     *  - "all"        → every .txt file in inputs/job_ads/
+     */
+    jobAd?: string | string[];
+    /** Path to an uploaded resume (PDF/DOCX) for Phase-2 pipeline. */
+    uploadedResume?: string;
+
+    // ── Pipeline behaviour ──────────────────────────────────
+    /** "programmatic" (default) or "llm". */
+    mode?: 'programmatic' | 'llm';
+    /** Override the default outputs/ root directory. */
+    outputDir?: string;
+
+    // ── LLM settings ────────────────────────────────────────
+    /**
+     * Inline LLM config — replaces the legacy config/llm-config.json.
+     * Only consulted when mode is "llm".
+     */
+    llm?: LlmConfig;
+}
+
+// ---------------------------------------------------------------------------
 // Pipeline types
 // ---------------------------------------------------------------------------
 
@@ -321,6 +362,8 @@ export interface Phase2PipelineOptions {
     basePath?: string;
     outputDir?: string | null;
     mode?: 'programmatic' | 'llm';
+    /** Optional inline LLM config from a task file. */
+    llmConfig?: LlmConfig;
 }
 
 export interface Phase2PipelineResult {

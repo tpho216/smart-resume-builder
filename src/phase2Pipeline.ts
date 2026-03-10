@@ -30,7 +30,7 @@ import type { JsonResume, ScoreReport, Phase2PipelineOptions, Phase2PipelineResu
 let extractKeywordsFn: ((text: string) => { keywords: string[] }) | undefined;
 let deriveSeniorityFn: ((text: string) => string) | undefined;
 let tailorResumeFn: ((base: JsonResume, keywords: string[], seniority: string) => JsonResume) | undefined;
-let llmTailorResumeFn: ((base: JsonResume, jobAdText: string, keywords: string[], seniority: string) => Promise<JsonResume>) | undefined;
+let llmTailorResumeFn: ((base: JsonResume, jobAdText: string, keywords: string[], seniority: string, cfg?: unknown) => Promise<JsonResume>) | undefined;
 let calculateScoreFn: ((jobAdText: string, resume: JsonResume) => ScoreReport) | undefined;
 
 try {
@@ -54,6 +54,7 @@ export async function runPhase2Pipeline(options: Phase2PipelineOptions): Promise
         basePath = DEFAULT_BASE,
         outputDir = null,
         mode = 'programmatic',
+        llmConfig,
     } = options;
 
     const uploadName = path.basename(uploadedResumePath, path.extname(uploadedResumePath));
@@ -115,7 +116,7 @@ export async function runPhase2Pipeline(options: Phase2PipelineOptions): Promise
 
         if (mode === 'llm' && llmTailorResumeFn) {
             console.log('       Calling LLM...');
-            resumeToRender = await llmTailorResumeFn(baseResume, jobAdText, keywords, seniority);
+            resumeToRender = await llmTailorResumeFn(baseResume, jobAdText, keywords, seniority, llmConfig);
         } else if (tailorResumeFn) {
             resumeToRender = tailorResumeFn(baseResume, keywords, seniority);
         } else {
@@ -182,13 +183,49 @@ export async function runPhase2Pipeline(options: Phase2PipelineOptions): Promise
 async function main(): Promise<void> {
     const args = process.argv.slice(2);
     if (args.length === 0 || args.includes('--help')) {
-        console.log('Usage: node dist/phase2Pipeline.js <resume.pdf|.docx> [--job-ad ad.txt] [--base base-resume.json] [--output dir]');
+        console.log(
+            'Usage: node dist/phase2Pipeline.js <resume.pdf|.docx>\n' +
+            '         [--task inputs/tasks/task_<n>.json]\n' +
+            '         [--job-ad ad.txt] [--base base-resume.json]\n' +
+            '         [--output dir] [--mode programmatic|llm]\n' +
+            '         [--provider name] [--model name]'
+        );
         process.exit(args.includes('--help') ? 0 : 1);
     }
 
-    const uploadedResumePath = args[0];
-    if (!fs.existsSync(uploadedResumePath)) {
-        console.error(`Error: File not found: ${uploadedResumePath}`);
+    // Optional --task flag loads a TaskConfig
+    const taskIdx = args.indexOf('--task');
+    let taskCfg: import('./types').TaskConfig | undefined;
+    let llmConfig: import('./types').LlmConfig | undefined;
+    if (taskIdx !== -1) {
+        const taskPath = args[taskIdx + 1];
+        if (!fs.existsSync(taskPath)) {
+            console.error(`Error: Task file not found: ${taskPath}`);
+            process.exit(1);
+        }
+        taskCfg = JSON.parse(fs.readFileSync(taskPath, 'utf-8'));
+        llmConfig = taskCfg?.llm;
+    }
+
+    // CLI overrides
+    const providerIdx = args.indexOf('--provider');
+    const modelIdx = args.indexOf('--model');
+    if (providerIdx !== -1 && llmConfig) {
+        llmConfig = { ...llmConfig, provider: args[providerIdx + 1] };
+    }
+    if (modelIdx !== -1 && llmConfig) {
+        const p = llmConfig.provider;
+        llmConfig = {
+            ...llmConfig,
+            providers: { ...llmConfig.providers, [p]: { ...llmConfig.providers?.[p], model: args[modelIdx + 1] } },
+        };
+    }
+
+    // Uploaded resume: first positional arg, or task.uploadedResume
+    const positional = args.filter((a, i) => !a.startsWith('--') && (i === 0 || !args[i - 1].startsWith('--')));
+    const uploadedResumePath = positional[0] ?? taskCfg?.uploadedResume;
+    if (!uploadedResumePath || !fs.existsSync(uploadedResumePath)) {
+        console.error(`Error: Uploaded resume not found: ${uploadedResumePath}`);
         process.exit(1);
     }
 
@@ -196,14 +233,17 @@ async function main(): Promise<void> {
     const baseIdx = args.indexOf('--base');
     const outIdx = args.indexOf('--output');
     const modeIdx = args.indexOf('--mode');
-    const mode = modeIdx !== -1 ? (args[modeIdx + 1] as 'programmatic' | 'llm') : 'programmatic';
+    const mode = modeIdx !== -1
+        ? (args[modeIdx + 1] as 'programmatic' | 'llm')
+        : taskCfg?.mode ?? 'programmatic';
 
     await runPhase2Pipeline({
         uploadedResumePath,
-        jobAdPath: jobAdIdx !== -1 ? args[jobAdIdx + 1] : null,
-        basePath: baseIdx !== -1 ? args[baseIdx + 1] : DEFAULT_BASE,
-        outputDir: outIdx !== -1 ? args[outIdx + 1] : null,
+        jobAdPath: jobAdIdx !== -1 ? args[jobAdIdx + 1] : (taskCfg?.jobAd as string | null | undefined ?? null),
+        basePath: baseIdx !== -1 ? args[baseIdx + 1] : (taskCfg?.baseResume ?? DEFAULT_BASE),
+        outputDir: outIdx !== -1 ? args[outIdx + 1] : (taskCfg?.outputDir ?? null),
         mode,
+        llmConfig,
     });
 }
 
