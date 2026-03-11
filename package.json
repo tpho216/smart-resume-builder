@@ -21,7 +21,10 @@
     "upload": "node dist/parseUploadedResume.js",
     "analyze": "node dist/analyzeStructure.js",
     "theme:generate": "node dist/generateTheme.js",
-    "phase2": "tsx src/pipeline.ts"
+    "phase2": "tsx src/pipeline.ts",
+    "test:docx": "tsx src/testDocxStructure.ts",
+    "test:replica": "tsx src/generateReplicaDocx.ts",
+    "test:llm-docx": "tsx src/llmAnalyzeDocx.ts"
   },
   "keywords": [
     "resume",
@@ -36,9 +39,11 @@
   "dependencies": {
     "docx": "^9.6.0",
     "dotenv": "^17.3.1",
+    "fast-xml-parser": "^5.5.2",
     "jsonresume-theme-elegant": "^1.16.1",
     "mammoth": "^1.8.0",
     "pdf-parse": "^1.1.1",
+    "pizzip": "^3.2.0",
     "puppeteer": "^24.38.0",
     "resume-cli": "^3.0.7"
   },
