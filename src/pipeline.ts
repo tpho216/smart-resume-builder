@@ -55,6 +55,8 @@ import { programmaticallyTailorResume } from './tailorResume';
 import { llmTailorResume } from './llmTailorResume';
 import { renderToHtml, renderToHtmlWithNamedTheme, renderToPdf } from './renderResume';
 import { renderToDocx } from './renderDocx';
+import { analyzeDocxTemplate } from './llmAnalyzeDocx';
+import { renderDocxFromAnalysis } from './renderFromAnalysis';
 import { calculateScore } from './scoreResume';
 import { parseUploadedResume } from './parseUploadedResume';
 import { analyzeStructure } from './analyzeStructure';
@@ -170,6 +172,8 @@ interface ResolvedConfig {
     templateResumePath?: string;
     /** Named JSON Resume theme (e.g. "elegant", "even"). */
     theme?: string;
+    /** Path to a DOCX template for LLM-analysis-based DOCX output. */
+    templateDocxPath?: string;
 }
 
 function resolveConfig(cli: CliArgs, task?: TaskConfig): ResolvedConfig {
@@ -224,6 +228,9 @@ function resolveConfig(cli: CliArgs, task?: TaskConfig): ResolvedConfig {
                 ? path.resolve(task.templateResume)
                 : undefined,
         theme: cli.theme ?? task?.theme,
+        templateDocxPath: task?.templateDocx
+            ? path.resolve(task.templateDocx)
+            : undefined,
     };
 }
 
@@ -354,7 +361,18 @@ async function runPipeline(
     fs.writeFileSync(docxPath, docxBuffer);
     console.log(`       DOCX → ${docxPath}`);
 
-    // ── Step 4: Score ────────────────────────────────────────
+    // ── Template DOCX (LLM-analysis-based) ──────────────────
+    if (config.templateDocxPath) {
+        console.log(`\n[${stepOffset + 3}b] Rendering template DOCX...`);
+        console.log(`       Template: ${config.templateDocxPath}`);
+        const analysis = await analyzeDocxTemplate(
+            config.templateDocxPath,
+            path.resolve(process.cwd(), 'inputs/tasks/task_1.json'),
+        );
+        const tplDocxPath = path.join(outDir, `Resume_${safeName}_template.docx`);
+        await renderDocxFromAnalysis(analysis, tailored, tplDocxPath);
+        console.log(`       Template DOCX → ${tplDocxPath}`);
+    }
     console.log(`\n[${stepOffset + 4}/${totalSteps}] Scoring resume...`);
     const score = calculateScore(jobAdText, tailored);
     const scorePath = path.join(outDir, 'score.json');

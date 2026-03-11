@@ -16,6 +16,7 @@
     "pipeline:all": "tsx src/pipeline.ts --all",
     "task:1": "tsx src/pipeline.ts --task inputs/tasks/task_1.json",
     "task:2": "tsx src/pipeline.ts --task inputs/tasks/task_2.json",
+    "render:template": "tsx scripts/reRenderTemplate.ts",
     "validate": "resume validate -r base-resume-example.json",
     "demo:generate": "node dist/generateDemo.js",
     "upload": "node dist/parseUploadedResume.js",
@@ -24,7 +25,8 @@
     "phase2": "tsx src/pipeline.ts",
     "test:docx": "tsx src/testDocxStructure.ts",
     "test:replica": "tsx src/generateReplicaDocx.ts",
-    "test:llm-docx": "tsx src/llmAnalyzeDocx.ts"
+    "test:llm-docx": "tsx src/llmAnalyzeDocx.ts",
+    "render:analysis": "tsx src/renderFromAnalysis.ts"
   },
   "keywords": [
     "resume",

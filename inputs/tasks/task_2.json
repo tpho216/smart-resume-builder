@@ -1,12 +1,11 @@
 {
     "task": 2,
-    "description": "Backend Node.js Developer — programmatic tailoring",
-
+    "description": "Backend Node.js Developer — LLM tailoring",
     "baseResume": "base-resume.json",
-    "jobAd": "inputs/job_ads/backend_nodejs_developer.txt",
-    "mode": "programmatic",
-    "outputDir": "outputs/job_backend_nodejs_developer",
-
+    "jobAd": "inputs/job_ads/revel_street.txt",
+    "mode": "llm",
+    "outputDir": "outputs",
+    "templateDocx": "inputs/job_templates/resume_template_2.docx",
     "llm": {
         "provider": "github-copilot",
         "promptFile": "config/llm-prompt.md",

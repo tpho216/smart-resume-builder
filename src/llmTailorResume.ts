@@ -210,19 +210,23 @@ function stripHtml(str: string): string {
 function sanitizeTextFields(resume: JsonResume): JsonResume {
     if (resume.basics) {
         if (resume.basics.summary) resume.basics.summary = stripHtml(resume.basics.summary);
-        if (resume.basics.label)   resume.basics.label   = stripHtml(resume.basics.label);
+        if (resume.basics.label) resume.basics.label = stripHtml(resume.basics.label);
     }
     resume.work?.forEach(w => {
-        if (w.summary)    w.summary    = stripHtml(w.summary);
+        if (w.summary) w.summary = stripHtml(w.summary);
         if (w.highlights) w.highlights = w.highlights.map(stripHtml);
     });
     resume.projects?.forEach(p => {
         if (p.description) p.description = stripHtml(p.description);
-        if (p.summary)     p.summary     = stripHtml(p.summary);
-        if (p.highlights)  p.highlights  = p.highlights.map(stripHtml);
+        if (p.summary) p.summary = stripHtml(p.summary);
+        if (p.highlights) p.highlights = p.highlights.map(stripHtml);
+    });
+    resume.skills?.forEach(s => {
+        if (s.name) s.name = stripHtml(s.name);
+        if (s.keywords) s.keywords = s.keywords.map(stripHtml);
     });
     resume.volunteer?.forEach(v => {
-        if (v.summary)    v.summary    = stripHtml(v.summary);
+        if (v.summary) v.summary = stripHtml(v.summary);
         if (v.highlights) v.highlights = v.highlights.map(stripHtml);
     });
     resume.awards?.forEach(a => {

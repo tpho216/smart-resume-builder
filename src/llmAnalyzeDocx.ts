@@ -583,7 +583,64 @@ async function generateReplicaDocx(analysis: DocxAnalysis, outPath: string): Pro
 }
 
 // ---------------------------------------------------------------------------
-// Main
+// Exported API
+// ---------------------------------------------------------------------------
+
+/**
+ * Analyse a DOCX template with the LLM.
+ * If a cached analysis JSON already exists it is loaded directly (no LLM call).
+ * @param docxPath     Absolute path to the .docx template file.
+ * @param taskConfigPath  Path to task JSON that holds llm.providers config (defaults to inputs/tasks/task_1.json).
+ * @param providerName LLM provider key (defaults to 'github-copilot').
+ * @returns Parsed DocxAnalysis object.
+ */
+export async function analyzeDocxTemplate(
+    docxPath: string,
+    taskConfigPath?: string,
+    providerName = 'github-copilot',
+): Promise<DocxAnalysis> {
+    const baseName = path.basename(docxPath, '.docx');
+    const cacheDir = path.resolve(process.cwd(), 'outputs/llm_docx_analysis');
+    const analysisPath = path.join(cacheDir, `${baseName}.analysis.json`);
+
+    // Use cached result if available
+    if (fs.existsSync(analysisPath)) {
+        console.log(`  [llmAnalyzeDocx] Loading cached analysis: ${analysisPath}`);
+        return JSON.parse(fs.readFileSync(analysisPath, 'utf-8')) as DocxAnalysis;
+    }
+
+    // Load provider config
+    const resolvedTaskPath = taskConfigPath
+        ?? path.resolve(process.cwd(), 'inputs/tasks/task_1.json');
+    const task = JSON.parse(fs.readFileSync(resolvedTaskPath, 'utf-8'));
+    const providerCfg: ProviderCfg = task.llm?.providers?.[providerName];
+    if (!providerCfg) {
+        throw new Error(`Provider "${providerName}" not found in ${resolvedTaskPath}`);
+    }
+
+    fs.mkdirSync(cacheDir, { recursive: true });
+
+    console.log(`  [llmAnalyzeDocx] Extracting structure from: ${docxPath}`);
+    const { paragraphSummary, tablesSummary, styleNames } = extractXmlText(docxPath);
+    const userPrompt = buildAnalysisPrompt(paragraphSummary, tablesSummary, styleNames);
+
+    console.log(`  [llmAnalyzeDocx] Calling LLM (${providerName} / ${providerCfg.model})...`);
+    const rawJson = await callLlm(providerCfg, SYSTEM_PROMPT, userPrompt);
+
+    let analysis: DocxAnalysis;
+    try {
+        analysis = JSON.parse(rawJson);
+    } catch (e) {
+        console.error('LLM returned invalid JSON:', rawJson.slice(0, 500));
+        throw e;
+    }
+    fs.writeFileSync(analysisPath, JSON.stringify(analysis, null, 2));
+    console.log(`  [llmAnalyzeDocx] Analysis saved: ${analysisPath}`);
+    return analysis;
+}
+
+// ---------------------------------------------------------------------------
+// Main (standalone CLI)
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
@@ -597,40 +654,15 @@ async function main(): Promise<void> {
 
     // Load provider config from task_1.json
     const taskPath = path.resolve(process.cwd(), 'inputs/tasks/task_1.json');
-    const task = JSON.parse(fs.readFileSync(taskPath, 'utf-8'));
-    const providerCfg: ProviderCfg = task.llm?.providers?.[providerName];
-    if (!providerCfg) {
-        throw new Error(`Provider "${providerName}" not found in inputs/tasks/task_1.json`);
-    }
 
     // Output paths
     const baseName = path.basename(docxPath, '.docx');
     const outDir = path.resolve(process.cwd(), 'outputs/llm_docx_analysis');
-    fs.mkdirSync(outDir, { recursive: true });
-    const analysisPath = path.join(outDir, `${baseName}.analysis.json`);
     const replicaPath = path.join(outDir, `${baseName}.replica.docx`);
 
-    // 1. Extract DOCX structure
-    console.log(`\nExtracting structure from: ${docxPath}`);
-    const { paragraphSummary, tablesSummary, styleNames } = extractXmlText(docxPath);
-
-    // 2. Build prompt
-    const userPrompt = buildAnalysisPrompt(paragraphSummary, tablesSummary, styleNames);
-
-    // 3. Call LLM
-    console.log(`Calling LLM (${providerName} / ${providerCfg.model})...`);
-    const rawJson = await callLlm(providerCfg, SYSTEM_PROMPT, userPrompt);
-
-    // 4. Parse + save analysis
-    let analysis: DocxAnalysis;
-    try {
-        analysis = JSON.parse(rawJson);
-    } catch (e) {
-        console.error('LLM returned invalid JSON:', rawJson.slice(0, 500));
-        throw e;
-    }
-    fs.writeFileSync(analysisPath, JSON.stringify(analysis, null, 2));
-    console.log(`\nAnalysis saved: ${analysisPath}`);
+    // Analyse (uses cached JSON if already exists)
+    const analysis = await analyzeDocxTemplate(docxPath, taskPath, providerName);
+    console.log('\nAnalysis ready.');
 
     // Print summary
     console.log('\n── LLM ANALYSIS SUMMARY ────────────────────────────────────────────');
@@ -654,4 +686,4 @@ async function main(): Promise<void> {
     console.log('Open in Word/LibreOffice to visually verify the layout matches the original.');
 }
 
-main().catch(err => { console.error(err); process.exit(1); });
+if (require.main === module) main().catch(err => { console.error(err); process.exit(1); });

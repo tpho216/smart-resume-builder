@@ -343,6 +343,12 @@ export interface TaskConfig {
      * it is not already available.  Ignored when templateResume is set.
      */
     theme?: string;
+    /**
+     * Path to a DOCX template whose layout (analysed by llmAnalyzeDocx.ts)
+     * should be used to render the tailored resume as a DOCX file.
+     * When set, the pipeline also produces <name>.template.docx in outDir.
+     */
+    templateDocx?: string;
 
     // ── Pipeline behaviour ──────────────────────────────────
     /** "programmatic" (default) or "llm". */
