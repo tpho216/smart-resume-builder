@@ -21,7 +21,7 @@
     "upload": "node dist/parseUploadedResume.js",
     "analyze": "node dist/analyzeStructure.js",
     "theme:generate": "node dist/generateTheme.js",
-    "phase2": "node dist/phase2Pipeline.js"
+    "phase2": "tsx src/pipeline.ts"
   },
   "keywords": [
     "resume",

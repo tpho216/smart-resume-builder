@@ -14,6 +14,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { execSync } from 'child_process';
 import type { JsonResume } from './types';
 
 // ---------------------------------------------------------------------------
@@ -60,6 +61,42 @@ export function renderToHtml(resumeJson: JsonResume): string {
         console.warn('Theme not installed, using built-in renderer. Run: npm install jsonresume-theme-elegant');
         return renderBuiltInHtml(resumeJson);
     }
+}
+
+/**
+ * Render using a named JSON Resume theme package (e.g. "elegant", "even").
+ * Installs the theme on the fly if it isn't already available.
+ */
+export function renderToHtmlWithNamedTheme(resumeJson: JsonResume, themeName: string): string {
+    const pkgName = themeName.startsWith('jsonresume-theme-')
+        ? themeName
+        : `jsonresume-theme-${themeName}`;
+
+    // Attempt to load; install if missing
+    let theme: { render: (resume: JsonResume) => string };
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        theme = require(pkgName) as typeof theme;
+    } catch {
+        console.log(`       Theme "${pkgName}" not found — installing...`);
+        execSync(`npm install --no-save ${pkgName}`, {
+            cwd: path.join(__dirname, '..'),
+            stdio: 'pipe',
+        });
+        // Clear require cache and retry
+        delete require.cache[require.resolve(pkgName)];
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        theme = require(pkgName) as typeof theme;
+        console.log(`       Installed ${pkgName}`);
+    }
+
+    let html = theme.render(resumeJson);
+
+    // Apply same size overrides for consistent PDF output
+    if (html.includes('</head>')) {
+        html = html.replace('</head>', ELEGANT_SIZE_OVERRIDE + '</head>');
+    }
+    return html;
 }
 
 /**

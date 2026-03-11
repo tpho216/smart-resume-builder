@@ -1,6 +1,14 @@
 #!/usr/bin/env node
 /**
- * pipeline.ts — Resume builder pipeline (parse → tailor → render → score).
+ * pipeline.ts — Unified resume builder pipeline.
+ *
+ * Handles both Phase 1 (tailor → render → score) and Phase 2 (template resume
+ * → analyse structure → generate theme → render) in a single entry-point.
+ *
+ * Routing logic:
+ *   - templateResume set  → Phase 2 (custom theme from uploaded layout)
+ *   - theme set           → Phase 1 with a named JSON Resume theme (auto-installed)
+ *   - neither             → Phase 1 with the default "elegant" theme
  *
  * Usage:
  *   # Task file — bundles every setting needed for a run:
@@ -17,18 +25,27 @@
  *   node dist/pipeline.js --task inputs/tasks/task_1.json --mode programmatic
  *   node dist/pipeline.js --task inputs/tasks/task_1.json --provider anthropic
  *
+ *   # Phase 2 via CLI:
+ *   node dist/pipeline.js --task inputs/tasks/task_3.json
+ *   node dist/pipeline.js --template-resume inputs/job_templates/resume.docx --job-ad ad.txt
+ *
+ *   # Named theme:
+ *   node dist/pipeline.js --theme even --job-ad ad.txt
+ *
  *   # Process all job ads in inputs/job_ads/:
  *   node dist/pipeline.js --all [--mode programmatic|llm]
  *
  * Available flags (all optional when --task is provided):
- *   --task <path>        Path to a task_<n>.json config file
- *   --mode <mode>        programmatic | llm
- *   --base <path>        Base resume JSON path  (default: base-resume.json)
- *   --job-ad <path>      Job ad .txt file — may be repeated for multiple ads
- *   --all                Process every .txt file in inputs/job_ads/
- *   --output <dir>       Output root directory
- *   --provider <name>    LLM provider (overrides task.llm.provider)
- *   --model <name>       LLM model name (overrides task.llm.providers[provider].model)
+ *   --task <path>             Path to a task_<n>.json config file
+ *   --mode <mode>             programmatic | llm
+ *   --base <path>             Base resume JSON path  (default: base-resume.json)
+ *   --job-ad <path>           Job ad .txt file — may be repeated for multiple ads
+ *   --all                     Process every .txt file in inputs/job_ads/
+ *   --output <dir>            Output root directory
+ *   --provider <name>         LLM provider (overrides task.llm.provider)
+ *   --model <name>            LLM model name (overrides task.llm.providers[provider].model)
+ *   --template-resume <path>  Template resume (PDF/DOCX) → Phase 2 flow
+ *   --theme <name>            Named JSON Resume theme (e.g. "elegant", "even")
  */
 
 import fs from 'fs';
@@ -36,10 +53,13 @@ import path from 'path';
 import { extractKeywords, deriveSeniority } from './parseJobAd';
 import { programmaticallyTailorResume } from './tailorResume';
 import { llmTailorResume } from './llmTailorResume';
-import { renderToHtml, renderToPdf } from './renderResume';
+import { renderToHtml, renderToHtmlWithNamedTheme, renderToPdf } from './renderResume';
 import { renderToDocx } from './renderDocx';
 import { calculateScore } from './scoreResume';
-import type { JsonResume, LlmConfig, PipelineResult, TaskConfig } from './types';
+import { parseUploadedResume } from './parseUploadedResume';
+import { analyzeStructure } from './analyzeStructure';
+import { generateTheme, previewWithTheme } from './generateTheme';
+import type { JsonResume, LlmConfig, PipelineResult, TaskConfig, StructureAnalysis } from './types';
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -75,6 +95,8 @@ interface CliArgs {
     output?: string;
     provider?: string;
     model?: string;
+    templateResume?: string;
+    theme?: string;
     help: boolean;
 }
 
@@ -112,6 +134,12 @@ function parseCliArgs(argv: string[]): CliArgs {
             case '--model':
                 cli.model = argv[++i];
                 break;
+            case '--template-resume':
+                cli.templateResume = argv[++i];
+                break;
+            case '--theme':
+                cli.theme = argv[++i];
+                break;
             default:
                 // Positional: bare .json → task file; .txt → job ad
                 if (!arg.startsWith('--')) {
@@ -138,6 +166,10 @@ interface ResolvedConfig {
     outputsDir: string;
     llmConfig?: LlmConfig;
     description?: string;
+    /** Phase 2: path to a template resume whose layout should be replicated. */
+    templateResumePath?: string;
+    /** Named JSON Resume theme (e.g. "elegant", "even"). */
+    theme?: string;
 }
 
 function resolveConfig(cli: CliArgs, task?: TaskConfig): ResolvedConfig {
@@ -148,8 +180,8 @@ function resolveConfig(cli: CliArgs, task?: TaskConfig): ResolvedConfig {
     const outputsDir = cli.output
         ? path.resolve(cli.output)
         : task?.outputDir
-        ? path.resolve(task.outputDir)
-        : DEFAULT_OUTPUTS_DIR;
+            ? path.resolve(task.outputDir)
+            : DEFAULT_OUTPUTS_DIR;
 
     let jobAdPaths: string[] = [];
     if (cli.all) {
@@ -184,7 +216,15 @@ function resolveConfig(cli: CliArgs, task?: TaskConfig): ResolvedConfig {
         }
     }
 
-    return { mode, baseResumePath, jobAdPaths, outputsDir, llmConfig, description: task?.description };
+    return {
+        mode, baseResumePath, jobAdPaths, outputsDir, llmConfig, description: task?.description,
+        templateResumePath: cli.templateResume
+            ? path.resolve(cli.templateResume)
+            : task?.templateResume
+                ? path.resolve(task.templateResume)
+                : undefined,
+        theme: cli.theme ?? task?.theme,
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -205,22 +245,69 @@ async function runPipeline(
 
     fs.mkdirSync(outDir, { recursive: true });
 
+    const isPhase2 = !!config.templateResumePath;
+    const phaseLabel = isPhase2 ? 'Phase 2' : 'Phase 1';
+
     console.log(`\n${'='.repeat(60)}`);
-    console.log(`Pipeline: ${jobName}${config.description ? `  (${config.description})` : ''}`);
+    console.log(`Pipeline (${phaseLabel}): ${jobName}${config.description ? `  (${config.description})` : ''}`);
     console.log(`${'='.repeat(60)}`);
 
     const baseResume: JsonResume = JSON.parse(fs.readFileSync(config.baseResumePath, 'utf-8'));
     const jobAdText = fs.readFileSync(jobAdPath, 'utf-8');
 
-    // Step 1: Parse job ad
-    console.log('\n[1/4] Parsing job ad...');
+    // ── Phase 2 preamble: parse template → analyze → generate theme ──
+    let structure: StructureAnalysis | undefined;
+    let customThemeJs: string | undefined;
+
+    if (isPhase2) {
+        console.log('\n[P2-1] Parsing template resume...');
+        const parsed = await parseUploadedResume(config.templateResumePath!);
+        const parsedPath = path.join(outDir, 'parsed_resume.json');
+        const parsedForSave: Record<string, unknown> = { ...parsed };
+        if (typeof parsedForSave.html === 'string' && (parsedForSave.html as string).length > 5000) {
+            parsedForSave.htmlPreview = (parsedForSave.html as string).substring(0, 2000);
+            delete parsedForSave.html;
+        }
+        fs.writeFileSync(parsedPath, JSON.stringify(parsedForSave, null, 2));
+        console.log(`       Paragraphs: ${parsed.totalParagraphs}`);
+        console.log(`       Headings:   ${parsed.totalHeadingCandidates}`);
+        console.log(`       → ${parsedPath}`);
+
+        console.log('\n[P2-2] Analyzing structure...');
+        structure = analyzeStructure(parsed.paragraphs, parsed.headingCandidates);
+        const structurePath = path.join(outDir, 'structure_analysis.json');
+        fs.writeFileSync(structurePath, JSON.stringify(structure, null, 2));
+        console.log(`       Name:     ${structure.nameCandidate || 'N/A'}`);
+        console.log(`       Sections: ${structure.sectionOrder.join(' → ')}`);
+        console.log(`       → ${structurePath}`);
+
+        console.log('\n[P2-3] Generating custom theme...');
+        const theme = generateTheme(structure);
+        customThemeJs = theme.indexJs;
+        const themeDir = path.join(outDir, 'theme');
+        fs.mkdirSync(themeDir, { recursive: true });
+        fs.writeFileSync(path.join(themeDir, 'index.js'), theme.indexJs);
+        fs.writeFileSync(path.join(themeDir, 'package.json'), JSON.stringify({
+            name: 'jsonresume-theme-custom-generated',
+            version: '1.0.0',
+            main: 'index.js',
+        }, null, 2));
+        console.log(`       Section order: ${theme.sectionOrder.join(' → ')}`);
+        console.log(`       → ${themeDir}/index.js`);
+    }
+
+    // ── Step 1: Parse job ad ─────────────────────────────────
+    const stepOffset = isPhase2 ? 3 : 0;
+    const totalSteps = isPhase2 ? 7 : 4;
+
+    console.log(`\n[${stepOffset + 1}/${totalSteps}] Parsing job ad...`);
     const { keywords } = extractKeywords(jobAdText);
     const seniority = deriveSeniority(jobAdText);
     console.log(`       Seniority: ${seniority}`);
     console.log(`       Keywords (${keywords.length}): ${keywords.join(', ')}`);
 
-    // Step 2: Tailor resume
-    console.log(`\n[2/4] Tailoring resume (${config.mode})...`);
+    // ── Step 2: Tailor resume ────────────────────────────────
+    console.log(`\n[${stepOffset + 2}/${totalSteps}] Tailoring resume (${config.mode})...`);
     let tailored: JsonResume;
     if (config.mode === 'llm') {
         tailored = await llmTailorResume(baseResume, jobAdText, keywords, seniority, config.llmConfig);
@@ -231,12 +318,25 @@ async function runPipeline(
     fs.writeFileSync(tailoredPath, JSON.stringify(tailored, null, 2));
     console.log(`       → ${tailoredPath}`);
 
-    // Step 3: Render HTML + PDF + DOCX
-    console.log('\n[3/4] Rendering resume...');
+    // ── Step 3: Render HTML + PDF + DOCX ─────────────────────
+    console.log(`\n[${stepOffset + 3}/${totalSteps}] Rendering resume...`);
     const name = (tailored.basics && tailored.basics.name) || 'Resume';
     const safeName = name.replace(/\s+/g, '_');
 
-    const html = renderToHtml(tailored);
+    let html: string;
+    if (customThemeJs) {
+        // Phase 2: render with the custom-generated theme
+        console.log('       Using custom-generated theme');
+        html = previewWithTheme(customThemeJs, tailored as Record<string, unknown>);
+    } else if (config.theme) {
+        // Named theme (e.g. "elegant", "even")
+        console.log(`       Using theme: ${config.theme}`);
+        html = renderToHtmlWithNamedTheme(tailored, config.theme);
+    } else {
+        // Default elegant theme
+        html = renderToHtml(tailored);
+    }
+
     const htmlPath = path.join(outDir, `Resume_${safeName}.html`);
     fs.writeFileSync(htmlPath, html);
     console.log(`       HTML → ${htmlPath}`);
@@ -250,12 +350,12 @@ async function runPipeline(
     }
 
     const docxPath = path.join(outDir, `Resume_${safeName}.docx`);
-    const docxBuffer = await renderToDocx(tailored);
+    const docxBuffer = await renderToDocx(tailored, structure);
     fs.writeFileSync(docxPath, docxBuffer);
     console.log(`       DOCX → ${docxPath}`);
 
-    // Step 4: Score
-    console.log('\n[4/4] Scoring resume...');
+    // ── Step 4: Score ────────────────────────────────────────
+    console.log(`\n[${stepOffset + 4}/${totalSteps}] Scoring resume...`);
     const score = calculateScore(jobAdText, tailored);
     const scorePath = path.join(outDir, 'score.json');
     fs.writeFileSync(scorePath, JSON.stringify(score, null, 2));
@@ -275,7 +375,7 @@ async function runPipeline(
 
 function printHelp(): void {
     console.log(`
-Smart Resume Builder — pipeline
+Smart Resume Builder — unified pipeline
 
 Usage:
   node dist/pipeline.js --task <task.json> [overrides]
@@ -284,21 +384,31 @@ Usage:
   node dist/pipeline.js --all [flags]
 
 Flags:
-  --task <path>      Task config JSON (e.g. inputs/tasks/task_1.json)
-  --mode <mode>      programmatic | llm           (overrides task)
-  --base <path>      Base resume JSON             (overrides task.baseResume)
-  --job-ad <path>    Job ad .txt file, repeatable (overrides task.jobAd)
-  --all              Process all .txt files in inputs/job_ads/
-  --output <dir>     Output directory             (overrides task.outputDir)
-  --provider <name>  LLM provider                 (overrides task.llm.provider)
-  --model <name>     LLM model name               (overrides provider model)
-  --help             Show this message
+  --task <path>             Task config JSON (e.g. inputs/tasks/task_1.json)
+  --mode <mode>             programmatic | llm           (overrides task)
+  --base <path>             Base resume JSON             (overrides task.baseResume)
+  --job-ad <path>           Job ad .txt file, repeatable (overrides task.jobAd)
+  --all                     Process all .txt files in inputs/job_ads/
+  --output <dir>            Output directory             (overrides task.outputDir)
+  --provider <name>         LLM provider                 (overrides task.llm.provider)
+  --model <name>            LLM model name               (overrides provider model)
+  --template-resume <path>  Template resume PDF/DOCX → Phase 2 (custom theme)
+  --theme <name>            Named JSON Resume theme (e.g. "elegant", "even")
+  --help                    Show this message
+
+Phase routing:
+  templateResume set  → Phase 2 (parse template → analyze → custom theme)
+  theme set           → Phase 1 with named theme (auto-installed if needed)
+  neither             → Phase 1 with default "elegant" theme
 
 Examples:
   node dist/pipeline.js --task inputs/tasks/task_1.json
   node dist/pipeline.js inputs/tasks/task_2.json --mode llm
   node dist/pipeline.js inputs/job_ads/my_role.txt --mode llm --provider openai
   node dist/pipeline.js --all --mode programmatic
+  node dist/pipeline.js --task inputs/tasks/task_3.json          # Phase 2
+  node dist/pipeline.js --template-resume resume.docx --job-ad ad.txt
+  node dist/pipeline.js --theme even --job-ad ad.txt
 `);
 }
 
@@ -340,6 +450,11 @@ async function main(): Promise<void> {
     console.log(`Mode:        ${config.mode}`);
     console.log(`Base resume: ${config.baseResumePath}`);
     console.log(`Job ads:     ${config.jobAdPaths.map(p => path.relative(PROJECT_ROOT, p)).join(', ')}`);
+    if (config.templateResumePath) {
+        console.log(`Template:    ${path.relative(PROJECT_ROOT, config.templateResumePath)} (Phase 2)`);
+    } else if (config.theme) {
+        console.log(`Theme:       ${config.theme}`);
+    }
     if (config.llmConfig) {
         const provider = config.llmConfig.provider;
         const model = config.llmConfig.providers?.[provider]?.model ?? 'default';

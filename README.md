@@ -1,12 +1,18 @@
-# Resume Builder — AI-Assisted JSON Resume Pipeline
+# Smart Resume Builder — AI-Assisted JSON Resume Pipeline
 
-Automatically **tailor**, **render**, and **score** resumes for specific job ads using a CLI-driven Node.js pipeline built on the [JSON Resume](https://jsonresume.org) standard. Upload an existing resume to **analyze its structure** and **generate a matching theme**.
+Automatically **tailor**, **render**, and **score** resumes for specific job ads using a CLI-driven Node.js/TypeScript pipeline built on the [JSON Resume](https://jsonresume.org) standard. Upload an existing resume to **analyze its structure** and **generate a matching theme**, or specify a named theme to render with.
 
-> **Demo:** [GitHub Pages](https://tpho216.github.io/resume-builder/) — pre-generated outputs from dummy job ads.
+> **Demo:** [GitHub Pages](https://tpho216.github.io/smart-resume-builder/) — pre-generated outputs from dummy job ads and sample resumes.
 
 ---
 
 ## Architecture
+
+The unified pipeline handles both workflows through a single entry-point (`pipeline.ts`):
+
+- **`templateResume` set** → Phase 2 (parse template → analyze structure → custom theme → tailor → render)
+- **`theme` set** → Phase 1 with a named JSON Resume theme (auto-installed if needed)
+- **Neither** → Phase 1 with the default "elegant" theme
 
 ### Phase 1 — Tailor & Score
 
@@ -20,12 +26,12 @@ base-resume.json          ← Superset of all skills, projects, experience
         │ keywords
         ▼
  ┌──────────────┐
- │ tailorResume │──► tailored_resume.json  (filtered & prioritized)
+ │ tailorResume │──► tailored_resume.json  (filtered & prioritised)
  └──────┬───────┘
         │
         ▼
  ┌──────────────┐
- │ renderResume │──► Resume_Peter_Ho.html + Resume_Peter_Ho.pdf
+ │ renderResume │──► Resume_Jane_Doe.html + .pdf + .docx
  └──────┬───────┘
         │
         ▼
@@ -37,7 +43,7 @@ base-resume.json          ← Superset of all skills, projects, experience
 ### Phase 2 — Structure Analysis & Theme Generation
 
 ```
-uploaded_resume.pdf/.docx/.txt
+template_resume.pdf/.docx         ← Uploaded resume whose layout to replicate
         │
         ▼
  ┌─────────────────────┐
@@ -54,12 +60,8 @@ uploaded_resume.pdf/.docx/.txt
  │ generateTheme │──► custom jsonresume-theme (index.js + package.json)
  └───────┬───────┘
          │
-         ├──► (optional) tailorResume  ──► tailored_resume.json
-         │
          ▼
- ┌──────────────┐
- │ renderResume │──► Themed HTML + PDF using the generated theme
- └──────────────┘
+  [Phase 1 pipeline]  ──► Tailor + Render (with custom theme) + Score
 ```
 
 ---
@@ -75,11 +77,11 @@ cp base-resume-example.json base-resume.json
 
 # 3. Edit base-resume.json with your own data (see "Setting Up Your Resume" below)
 
-# 4. Run the full pipeline for a single job ad
-node scripts/pipeline.js job_ads/senior_fullstack_engineer.txt
+# 4. Run the pipeline with a task file
+npm run task:1
 
 # 5. Or run for ALL job ads at once
-node scripts/pipeline.js --all
+npm run pipeline:all
 ```
 
 > **Note:** `base-resume.json` is git-ignored to keep personal data out of version control.
@@ -104,7 +106,7 @@ node scripts/pipeline.js --all
 3. The `_tags` arrays on work and project entries help the tailoring engine select the most relevant items for each job ad. Use short descriptive tags like `"fullstack"`, `"backend"`, `"cloud"`, `"devops"`, etc.
 4. The file follows the [JSON Resume](https://jsonresume.org/schema) schema. Validate with:
    ```bash
-   npx resume validate base-resume.json
+   npm run validate
    ```
 
 ### Output
@@ -113,8 +115,9 @@ node scripts/pipeline.js --all
 outputs/
   job_senior_fullstack_engineer/
     tailored_resume.json
-    Resume_Peter_Ho.html
-    Resume_Peter_Ho.pdf
+    Resume_Jane_Doe.html
+    Resume_Jane_Doe.pdf
+    Resume_Jane_Doe.docx
     score.json
   job_backend_nodejs_developer/
     ...
@@ -122,110 +125,171 @@ outputs/
 
 ---
 
+## Task Files
+
+Tasks are the recommended way to configure pipeline runs. Each task file bundles all settings needed for one job:
+
+```json
+{
+    "task": 1,
+    "description": "Senior Fullstack Engineer — LLM-tailored",
+    "baseResume": "base-resume.json",
+    "jobAd": "inputs/job_ads/senior_fullstack_engineer.txt",
+    "mode": "llm",
+    "outputDir": "outputs/job_senior_fullstack_engineer",
+    "templateResume": "inputs/job_templates/resume_template_1.docx",
+    "theme": "elegant",
+    "llm": {
+        "provider": "github-copilot",
+        "promptFile": "config/llm-prompt.md"
+    }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `baseResume` | Path to the base JSON Resume |
+| `jobAd` | Job ad file path, array of paths, or `"all"` |
+| `mode` | `"programmatic"` (keyword matching) or `"llm"` (AI rewriting) |
+| `outputDir` | Output directory for this run |
+| `templateResume` | *(Phase 2)* Path to a template resume (PDF/DOCX) whose layout to replicate |
+| `theme` | Named JSON Resume theme (e.g. `"elegant"`, `"even"`) — auto-installed if needed |
+| `llm` | LLM provider config (only used when `mode` is `"llm"`) |
+
+**Routing:** `templateResume` → Phase 2 custom theme. `theme` → named theme. Neither → default elegant.
+
+---
+
 ## CLI Commands
 
-### Parse a job ad (extract keywords)
+### Unified pipeline (recommended)
+
 ```bash
-node scripts/parseJobAd.js job_ads/senior_fullstack_engineer.txt
+# Via task file
+tsx src/pipeline.ts --task inputs/tasks/task_1.json
+
+# Shorthand (auto-detects .json as task file)
+tsx src/pipeline.ts inputs/tasks/task_1.json
+
+# Pure CLI (no task file)
+tsx src/pipeline.ts --job-ad inputs/job_ads/senior_fullstack_engineer.txt
+
+# With LLM tailoring
+tsx src/pipeline.ts --job-ad inputs/job_ads/senior_fullstack_engineer.txt --mode llm
+
+# Process all job ads
+tsx src/pipeline.ts --all
+
+# Phase 2 via CLI (template resume → custom theme)
+tsx src/pipeline.ts --template-resume inputs/job_templates/resume_template_1.docx \
+  --job-ad inputs/job_ads/senior_fullstack_engineer.txt
+
+# Named theme
+tsx src/pipeline.ts --theme even --job-ad inputs/job_ads/senior_fullstack_engineer.txt
+
+# Override task file settings from CLI
+tsx src/pipeline.ts --task inputs/tasks/task_1.json --mode programmatic --provider anthropic
 ```
 
-### Tailor resume for a job ad
+### npm scripts
+
 ```bash
-node scripts/tailorResume.js job_ads/senior_fullstack_engineer.txt
+npm run pipeline          # Run pipeline (requires flags or task)
+npm run pipeline:all      # Run for all job ads
+npm run task:1            # Run task 1
+npm run task:2            # Run task 2
+npm run validate          # Validate JSON Resume schema
+npm run build             # Compile TypeScript
 ```
 
-### Render tailored resume to HTML + PDF
+### Individual steps
+
 ```bash
-node scripts/renderResume.js outputs/job_senior_fullstack_engineer/tailored_resume.json
+# Parse a job ad (extract keywords)
+node dist/parseJobAd.js inputs/job_ads/senior_fullstack_engineer.txt
+
+# Tailor resume for a job ad
+node dist/tailorResume.js inputs/job_ads/senior_fullstack_engineer.txt
+
+# Render tailored resume to HTML + PDF
+node dist/renderResume.js outputs/job_senior_fullstack_engineer/tailored_resume.json
+
+# Score resume against job ad
+node dist/scoreResume.js inputs/job_ads/senior_fullstack_engineer.txt
+
+# Parse an uploaded resume (Phase 2)
+node dist/parseUploadedResume.js samples/sample_resume.txt
+
+# Analyze structure (Phase 2)
+node dist/analyzeStructure.js samples/sample_resume.txt
+
+# Generate a custom theme from structure (Phase 2)
+node dist/generateTheme.js outputs/phase2_sample/structure_analysis.json --output themes/my-theme
+
+# Generate demo assets for GitHub Pages
+node dist/generateDemo.js
 ```
 
-### Score resume against job ad
-```bash
-node scripts/scoreResume.js job_ads/senior_fullstack_engineer.txt outputs/job_senior_fullstack_engineer/tailored_resume.json
-```
+### CLI flags reference
 
-### Full pipeline (parse → tailor → render → score)
-```bash
-node scripts/pipeline.js job_ads/senior_fullstack_engineer.txt
-```
-
-### Run for ALL job ads
-```bash
-node scripts/pipeline.js --all
-```
-
-### Generate demo assets for GitHub Pages
-```bash
-node scripts/generateDemo.js
-```
-
-### Validate JSON Resume schema
-```bash
-npx resume validate base-resume.json
-```
-
-### Phase 2 — Upload & analyze a resume
-```bash
-node scripts/parseUploadedResume.js samples/sample_resume.txt
-```
-
-### Phase 2 — Analyze structure
-```bash
-node scripts/analyzeStructure.js samples/sample_resume.txt
-```
-
-### Phase 2 — Generate a custom theme from structure
-```bash
-node scripts/generateTheme.js samples/sample_resume.txt --output themes/my-theme
-```
-
-### Phase 2 — Full pipeline (parse → analyze → theme → render)
-```bash
-node scripts/phase2Pipeline.js samples/sample_resume.txt --base base-resume.json
-```
-
-### Phase 2 — Full pipeline + tailor for a job ad
-```bash
-node scripts/phase2Pipeline.js samples/sample_resume.txt --base base-resume.json --job-ad job_ads/senior_fullstack_engineer.txt
-```
+| Flag | Description |
+|------|-------------|
+| `--task <path>` | Task config JSON file |
+| `--mode <mode>` | `programmatic` or `llm` |
+| `--base <path>` | Base resume JSON path |
+| `--job-ad <path>` | Job ad `.txt` file (repeatable) |
+| `--all` | Process all `.txt` files in `inputs/job_ads/` |
+| `--output <dir>` | Output directory |
+| `--provider <name>` | LLM provider (overrides task) |
+| `--model <name>` | LLM model name (overrides task) |
+| `--template-resume <path>` | Template resume PDF/DOCX → Phase 2 flow |
+| `--theme <name>` | Named JSON Resume theme |
 
 ---
 
 ## Project Structure
 
 ```
-resume-builder/
+smart-resume-builder/
 ├── base-resume.json              ← Your personal resume data (git-ignored)
 ├── base-resume-example.json      ← Example template with placeholder data
-├── job_ads/                      ← Job ad text files
-│   ├── senior_fullstack_engineer.txt
-│   └── backend_nodejs_developer.txt
-├── samples/                      ← Sample uploaded resumes (Phase 2)
-│   ├── sample_resume.txt
-│   └── sample_resume_devops.txt
-├── scripts/
-│   ├── parseJobAd.js             ← Extract keywords from job ad
-│   ├── tailorResume.js           ← Filter resume by relevance
-│   ├── renderResume.js           ← HTML + PDF rendering
-│   ├── scoreResume.js            ← ATS match scoring
-│   ├── pipeline.js               ← Full Phase 1 pipeline orchestrator
-│   ├── generateDemo.js           ← Generate demo outputs for Pages
-│   ├── parseUploadedResume.js    ← Parse PDF/DOCX/TXT uploads (Phase 2)
-│   ├── analyzeStructure.js       ← Detect section structure & style (Phase 2)
-│   ├── generateTheme.js          ← Generate custom JSON Resume theme (Phase 2)
-│   └── phase2Pipeline.js         ← Full Phase 2 pipeline orchestrator
+├── inputs/
+│   ├── job_ads/                  ← Job ad text files
+│   │   ├── senior_fullstack_engineer.txt
+│   │   └── backend_nodejs_developer.txt
+│   ├── job_templates/            ← Template resumes for Phase 2 (DOCX/PDF)
+│   │   └── resume_template_1.docx
+│   ├── samples/                  ← Sample uploaded resumes
+│   └── tasks/                    ← Task config files
+│       ├── task_1.json
+│       └── task_2.json
+├── src/                          ← TypeScript source
+│   ├── pipeline.ts               ← Unified pipeline (Phase 1 + Phase 2)
+│   ├── parseJobAd.ts             ← Extract keywords from job ads
+│   ├── tailorResume.ts           ← Filter resume by relevance
+│   ├── llmTailorResume.ts        ← LLM-powered resume tailoring
+│   ├── renderResume.ts           ← HTML + PDF rendering (named themes)
+│   ├── renderDocx.ts             ← DOCX rendering
+│   ├── scoreResume.ts            ← ATS match scoring
+│   ├── parseUploadedResume.ts    ← Parse PDF/DOCX/TXT uploads (Phase 2)
+│   ├── analyzeStructure.ts       ← Detect section structure & style (Phase 2)
+│   ├── generateTheme.ts          ← Generate custom JSON Resume theme (Phase 2)
+│   ├── generateDemo.ts           ← Generate demo outputs for Pages
+│   └── types.ts                  ← Shared TypeScript types
+├── config/
+│   ├── llm-config.json           ← LLM provider configuration
+│   └── llm-prompt.md             ← LLM tailoring prompt template
 ├── outputs/                      ← Generated files per job ad
-│   ├── job_senior_fullstack_engineer/
-│   └── job_backend_nodejs_developer/
 ├── docs/                         ← GitHub Pages demo
 │   ├── index.html
 │   ├── app.js
 │   ├── demo-manifest.json
 │   └── phase2-manifest.json
-├── themes/                       ← Generated custom themes (Phase 2)
+├── themes/                       ← Generated custom themes
 ├── .github/workflows/
 │   └── resume-pipeline.yml       ← CI: validate → build → score → deploy
 ├── package.json
+├── tsconfig.json
 └── README.md
 ```
 
@@ -233,20 +297,22 @@ resume-builder/
 
 ## GitHub Actions CI/CD
 
-The workflow (`.github/workflows/resume-pipeline.yml`) runs:
+The workflow (`.github/workflows/resume-pipeline.yml`) runs on push to `main`:
 
-| Job              | Purpose                                                | Fails CI?              |
-| ---------------- | ------------------------------------------------------ | ---------------------- |
-| **validate**     | Validate `base-resume.json` against JSON Resume schema | Yes                    |
-| **build**        | Tailor + render resumes for all job ads                | Yes                    |
-| **score-report** | Print ATS match scores and missing keywords            | **No** (informational) |
-| **deploy-pages** | Deploy demo to GitHub Pages (on `main` push)           | No                     |
+| Job              | Purpose                                                        | Fails CI?              |
+| ---------------- | -------------------------------------------------------------- | ---------------------- |
+| **validate**     | Validate `base-resume-example.json` against JSON Resume schema | Yes                    |
+| **build**        | Tailor + render resumes for all job ads                        | Yes                    |
+| **score-report** | Print ATS match scores and missing keywords                    | **No** (informational) |
+| **deploy-pages** | Deploy demo to GitHub Pages (on `main` push)                   | No                     |
+
+> CI uses `base-resume-example.json` (anonymised) since `base-resume.json` is git-ignored.
 
 ---
 
 ## ATS Score Calculation
 
-The scoring engine (`scoreResume.js`) compares tailored resume content against job ad keywords:
+The scoring engine (`scoreResume.ts`) compares tailored resume content against job ad keywords:
 
 - **Match Score** = `(matched keywords / total job ad keywords) × 100`
 - **ATS Parsing** = structural check (name, email, summary, work dates, skills, education)
@@ -258,7 +324,7 @@ Example output (`score.json`):
   "matchScore": 97,
   "matchedCount": 32,
   "totalKeywords": 33,
-  "matchedKeywords": ["React", "TypeScript", "Node.js", "AWS", ...],
+  "matchedKeywords": ["React", "TypeScript", "Node.js", "AWS"],
   "missingKeywords": ["CloudFormation"],
   "atsParsing": "PASS",
   "atsIssues": []
@@ -267,55 +333,23 @@ Example output (`score.json`):
 
 ---
 
-## Demo / Portfolio
-
-The GitHub Pages demo has two tabs:
-
-### Phase 1: Tailor & Score
-- ✅ Resume preview (rendered HTML)
-- ✅ PDF download link
-- ✅ ATS match score with matched/missing keywords
-- ✅ Job ad selector between dummy outputs
-
-### Phase 2: Structure & Theme
-- ✅ Uploaded resume structure analysis
-- ✅ Section flow visualization (detected section order)
-- ✅ Content style indicators (bullets, prose, list, paragraph)
-- ✅ Layout hints (experience before education, skills early, has summary)
-- ✅ Themed resume preview using the generated theme
-
-> **These are example outputs generated from dummy job ads and sample resumes. For a live demo with your own documents, please contact Peter.**
-
----
-
-## For Users Who Want to Run Their Own Pipeline
-
-1. **Fork** this repository
-2. Copy the example: `cp base-resume-example.json base-resume.json`
-3. Fill in `base-resume.json` with your own resume data (see [Setting Up Your Resume](#setting-up-your-resume))
-4. Add your job ads to `job_ads/`
-5. Run: `node scripts/pipeline.js --all`
-6. Check `outputs/` for your tailored resumes and scores
-
----
-
 ## Phase 2: Structure Analysis & Theme Generation
 
-Phase 2 enables uploading an existing resume and reproducing its layout as a JSON Resume theme.
+Phase 2 enables uploading an existing resume and reproducing its layout as a JSON Resume theme. It's triggered by setting `templateResume` in a task file or using `--template-resume` on the CLI.
 
 ### How it works
 
-1. **Parse** — `parseUploadedResume.js` reads PDF (via `pdf-parse`), DOCX (via `mammoth`), or plain text files. It extracts paragraphs and identifies heading candidates (short lines, ALL CAPS lines, colon-ending lines).
+1. **Parse** — `parseUploadedResume.ts` reads PDF (via `pdf-parse`), DOCX (via `mammoth`), or plain text files. It extracts paragraphs and identifies heading candidates (short lines, ALL CAPS lines, colon-ending lines).
 
-2. **Analyze** — `analyzeStructure.js` maps headings to 13 known section types (contact, summary, experience, education, skills, projects, certificates, awards, publications, languages, interests, references, volunteer) using regex patterns. For each section it detects content style:
+2. **Analyze** — `analyzeStructure.ts` maps headings to 13 known section types (contact, summary, experience, education, skills, projects, certificates, awards, publications, languages, interests, references, volunteer) using regex patterns. For each section it detects content style:
    - **bullets** — majority of lines start with bullet characters
    - **list** — short lines without bullets (e.g., skill lists)
    - **prose** — long continuous sentences
    - **paragraph** — mixed content
 
-3. **Theme** — `generateTheme.js` produces a self-contained `index.js` (valid jsonresume-theme module) with section renderers ordered to match the uploaded resume. The generated theme respects the detected layout hints.
+3. **Theme** — `generateTheme.ts` produces a self-contained `index.js` (valid jsonresume-theme module) with section renderers ordered to match the uploaded resume. The generated theme respects the detected layout hints.
 
-4. **Render** — The generated theme is applied to `base-resume.json` (optionally tailored for a job ad) and rendered to HTML + PDF.
+4. **Render** — The generated theme is applied to the tailored resume and rendered to HTML + PDF + DOCX.
 
 ### Layout Hints
 
@@ -335,26 +369,60 @@ Phase 2 enables uploading an existing resume and reproducing its layout as a JSO
 
 ---
 
+## Demo / Portfolio
+
+The [GitHub Pages demo](https://tpho216.github.io/smart-resume-builder/) has two tabs:
+
+### Phase 1: Tailor & Score
+- Resume preview (rendered HTML)
+- PDF download link
+- ATS match score with matched/missing keywords
+- Job ad selector between example outputs
+
+### Phase 2: Structure & Theme
+- Uploaded resume structure analysis
+- Section flow visualisation (detected section order)
+- Content style indicators (bullets, prose, list, paragraph)
+- Layout hints (experience before education, skills early, has summary)
+- Themed resume preview using the generated theme
+
+> These are example outputs generated from dummy job ads and sample resumes for demonstration purposes.
+
+---
+
+## For Users Who Want to Run Their Own Pipeline
+
+1. **Fork** this repository
+2. Copy the example: `cp base-resume-example.json base-resume.json`
+3. Fill in `base-resume.json` with your own resume data (see [Setting Up Your Resume](#setting-up-your-resume))
+4. Add your job ads to `inputs/job_ads/`
+5. Create a task file in `inputs/tasks/` (see [Task Files](#task-files))
+6. Run: `npm run task:1` or `tsx src/pipeline.ts --all`
+7. Check `outputs/` for your tailored resumes and scores
+
+---
+
 ## Future Roadmap
 
-- [ ] **Font/style detection** — Exact replication of fonts, colors, spacing from uploaded PDFs
+- [ ] **Font/style detection** — Exact replication of fonts, colours, spacing from uploaded PDFs
 - [ ] **Theme marketplace** — Share and reuse generated layout templates
 - [ ] **Web UI** — Browser-based upload + preview interface
-- [ ] **AI-powered tailoring** — LLM integration for rewriting bullet points
 
 ---
 
 ## Dependencies
 
-| Package                    | Phase | Purpose                                 |
-| -------------------------- | ----- | --------------------------------------- |
-| `resume-cli`               | 1     | JSON Resume validation                  |
-| `jsonresume-theme-elegant` | 1     | HTML theme rendering                    |
-| `puppeteer`                | 1+2   | PDF generation via headless Chrome      |
-| `pdf-parse`                | 2     | Extract text from uploaded PDF resumes  |
-| `mammoth`                  | 2     | Extract text from uploaded DOCX resumes |
-
-Phase 1 works with zero dependencies (built-in HTML renderer). Phase 2 parsing requires `pdf-parse` and/or `mammoth` depending on input format.
+| Package                    | Purpose                                          |
+| -------------------------- | ------------------------------------------------ |
+| `resume-cli`               | JSON Resume schema validation                    |
+| `jsonresume-theme-elegant` | Default HTML theme rendering                     |
+| `puppeteer`                | PDF generation via headless Chrome               |
+| `pdf-parse`                | Extract text from uploaded PDF resumes (Phase 2) |
+| `mammoth`                  | Extract text from uploaded DOCX resumes (Phase 2)|
+| `docx`                     | Generate DOCX output files                       |
+| `dotenv`                   | Load environment variables for LLM API keys      |
+| `tsx`                      | Run TypeScript directly without compiling         |
+| `typescript`               | TypeScript compiler                              |
 
 ---
 

@@ -331,6 +331,18 @@ export interface TaskConfig {
     jobAd?: string | string[];
     /** Path to an uploaded resume (PDF/DOCX) for Phase-2 pipeline. */
     uploadedResume?: string;
+    /**
+     * Path to a template resume (PDF/DOCX) whose layout should be replicated.
+     * When set, the pipeline runs Phase 2: analyze structure → generate
+     * custom theme → render with that theme.
+     */
+    templateResume?: string;
+    /**
+     * Name of a JSON Resume theme to render with (e.g. "elegant", "even").
+     * The theme package `jsonresume-theme-<name>` is installed on the fly if
+     * it is not already available.  Ignored when templateResume is set.
+     */
+    theme?: string;
 
     // ── Pipeline behaviour ──────────────────────────────────
     /** "programmatic" (default) or "llm". */
