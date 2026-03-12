@@ -21,9 +21,9 @@ import type { JsonResume } from './types.js';
 // ---------------------------------------------------------------------------
 // Rendering constants
 // ---------------------------------------------------------------------------
-const FONT = 'Calibri';
-const MARGIN = convertInchesToTwip(0.5);
-const PAGE_W = convertInchesToTwip(7.5);   // 8.5" − 2×0.5" margins
+const DEFAULT_FONT = 'Calibri';
+const DEFAULT_MARGIN = convertInchesToTwip(0.5);
+const DEFAULT_PAGE_W = convertInchesToTwip(7.5);   // 8.5" − 2×0.5" margins
 
 const BORDER_SOLID = {
     top: { style: BorderStyle.SINGLE, size: 6, color: '000000' },
@@ -31,6 +31,45 @@ const BORDER_SOLID = {
     left: { style: BorderStyle.SINGLE, size: 6, color: '000000' },
     right: { style: BorderStyle.SINGLE, size: 6, color: '000000' },
 };
+
+const BORDER_NONE = {
+    top: { style: BorderStyle.NONE, size: 0 },
+    bottom: { style: BorderStyle.NONE, size: 0 },
+    left: { style: BorderStyle.NONE, size: 0 },
+    right: { style: BorderStyle.NONE, size: 0 },
+};
+
+function createBorders(borderStyle: string, color?: string, widthPt?: number) {
+    const sz = widthPt ? Math.round(widthPt * 8) : 6;
+    const col = color || '000000';
+    const border = { style: BorderStyle.SINGLE, size: sz, color: col };
+
+    switch (borderStyle) {
+        case 'all':
+            return {
+                top: border,
+                bottom: border,
+                left: border,
+                right: border,
+            };
+        case 'horizontal':
+            return {
+                top: border,
+                bottom: border,
+                left: { style: BorderStyle.NONE, size: 0 },
+                right: { style: BorderStyle.NONE, size: 0 },
+            };
+        case 'vertical':
+            return {
+                top: { style: BorderStyle.NONE, size: 0 },
+                bottom: { style: BorderStyle.NONE, size: 0 },
+                left: border,
+                right: border,
+            };
+        default:
+            return BORDER_NONE;
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Placeholder content by semantic role / section key
@@ -98,59 +137,190 @@ function stripHtml(s: string): string {
     return s.replace(/<[^>]*>/g, '').replace(/\n+/g, ' ').trim();
 }
 
-function p(text: string, bold = false, sizePt = 11, indentTwip = 0): Paragraph {
+interface ParagraphOptions {
+    text: string;
+    bold?: boolean;
+    sizePt?: number;
+    indentTwip?: number;
+    font?: string;
+    color?: string;
+    alignment?: 'left' | 'center' | 'right' | 'justify';
+    spacingBefore?: number;
+    spacingAfter?: number;
+    lineSpacing?: number;
+}
+
+function p(text: string, bold = false, sizePt = 11, indentTwip = 0): Paragraph;
+function p(opts: ParagraphOptions): Paragraph;
+function p(
+    textOrOpts: string | ParagraphOptions,
+    bold = false,
+    sizePt = 11,
+    indentTwip = 0
+): Paragraph {
+    let opts: ParagraphOptions;
+    if (typeof textOrOpts === 'string') {
+        opts = { text: textOrOpts, bold, sizePt, indentTwip };
+    } else {
+        opts = textOrOpts;
+    }
+
+    const spacing: any = {
+        before: opts.spacingBefore !== undefined ? Math.round(opts.spacingBefore * 20) : 0,
+        after: opts.spacingAfter !== undefined ? Math.round(opts.spacingAfter * 20) : 60,
+    };
+    if (opts.lineSpacing) {
+        spacing.line = Math.round(opts.lineSpacing * 240);
+        spacing.lineRule = 'auto';
+    }
+
     return new Paragraph({
-        indent: indentTwip ? { left: indentTwip } : undefined,
-        spacing: { before: 0, after: 60 },
-        children: [new TextRun({ text: stripHtml(text), font: FONT, size: sizePt * 2, bold })],
+        indent: opts.indentTwip ? { left: opts.indentTwip } : undefined,
+        alignment: opts.alignment,
+        spacing,
+        children: [new TextRun({
+            text: stripHtml(opts.text),
+            font: opts.font || DEFAULT_FONT,
+            size: (opts.sizePt || 11) * 2,
+            bold: opts.bold || false,
+            color: opts.color,
+        })],
     });
 }
 
-function sectionHeading(text: string, fontSize = 14): Paragraph {
+interface SectionHeadingOptions {
+    text: string;
+    fontSize?: number;
+    font?: string;
+    color?: string;
+    bold?: boolean;
+    alignment?: 'left' | 'center' | 'right' | 'justify';
+    spacingBefore?: number;
+    spacingAfter?: number;
+}
+
+function sectionHeading(text: string, fontSize = 14): Paragraph;
+function sectionHeading(opts: SectionHeadingOptions): Paragraph;
+function sectionHeading(
+    textOrOpts: string | SectionHeadingOptions,
+    fontSize = 14
+): Paragraph {
+    let opts: SectionHeadingOptions;
+    if (typeof textOrOpts === 'string') {
+        opts = { text: textOrOpts, fontSize };
+    } else {
+        opts = textOrOpts;
+    }
+
+    const color = opts.color || '2563EB';
+    const spaceBefore = opts.spacingBefore !== undefined ? Math.round(opts.spacingBefore * 20) : 160;
+    const spaceAfter = opts.spacingAfter !== undefined ? Math.round(opts.spacingAfter * 20) : 80;
+
     return new Paragraph({
-        spacing: { before: 160, after: 80 },
-        border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: '2563EB' } },
-        children: [new TextRun({ text, font: FONT, size: fontSize * 2, bold: true, color: '2563EB' })],
+        alignment: opts.alignment,
+        spacing: { before: spaceBefore, after: spaceAfter },
+        border: { bottom: { style: BorderStyle.SINGLE, size: 6, color } },
+        children: [new TextRun({
+            text: opts.text,
+            font: opts.font || DEFAULT_FONT,
+            size: (opts.fontSize || 14) * 2,
+            bold: opts.bold !== undefined ? opts.bold : true,
+            color,
+        })],
     });
 }
 
 function empty(): Paragraph {
-    return new Paragraph({ children: [new TextRun({ text: '', font: FONT, size: 22 })] });
+    return new Paragraph({ children: [new TextRun({ text: '', font: DEFAULT_FONT, size: 22 })] });
 }
 
-function fixedTable(colWidths: number[], rowsData: Paragraph[][]): Table {
+interface TableStyleOptions {
+    borders?: string;
+    borderColor?: string;
+    borderWidthPt?: number;
+    cellPaddingPt?: number;
+    shading?: string;
+}
+
+function fixedTable(
+    colWidths: number[],
+    rowsData: Paragraph[][],
+    styleOpts?: TableStyleOptions
+): Table {
     const totalW = colWidths.reduce((a, b) => a + b, 0);
+    const borders = styleOpts?.borders
+        ? createBorders(styleOpts.borders, styleOpts.borderColor, styleOpts.borderWidthPt)
+        : BORDER_SOLID;
+    const cellPadding = styleOpts?.cellPaddingPt
+        ? Math.round(styleOpts.cellPaddingPt * 20)
+        : undefined;
+
     return new Table({
         width: { size: totalW, type: WidthType.DXA },
         columnWidths: colWidths,
         layout: TableLayoutType.FIXED,
         rows: [new TableRow({
-            children: colWidths.map((w, i) =>
-                new TableCell({
-                    borders: BORDER_SOLID,
+            children: colWidths.map((w, i) => {
+                const cellOpts: any = {
+                    borders,
                     width: { size: w, type: WidthType.DXA },
                     children: rowsData[i] ?? [p('')],
-                })
-            ),
+                };
+                if (cellPadding) {
+                    cellOpts.margins = {
+                        top: cellPadding,
+                        bottom: cellPadding,
+                        left: cellPadding,
+                        right: cellPadding,
+                    };
+                }
+                if (styleOpts?.shading) {
+                    cellOpts.shading = { fill: styleOpts.shading };
+                }
+                return new TableCell(cellOpts);
+            }),
         })],
     });
 }
 
-function multiRowFixedTable(colWidths: number[], rowsData: Paragraph[][][]): Table {
+function multiRowFixedTable(
+    colWidths: number[],
+    rowsData: Paragraph[][][],
+    styleOpts?: TableStyleOptions
+): Table {
     const totalW = colWidths.reduce((a, b) => a + b, 0);
+    const borders = styleOpts?.borders
+        ? createBorders(styleOpts.borders, styleOpts.borderColor, styleOpts.borderWidthPt)
+        : BORDER_SOLID;
+    const cellPadding = styleOpts?.cellPaddingPt
+        ? Math.round(styleOpts.cellPaddingPt * 20)
+        : undefined;
+
     return new Table({
         width: { size: totalW, type: WidthType.DXA },
         columnWidths: colWidths,
         layout: TableLayoutType.FIXED,
         rows: rowsData.map(rowCells =>
             new TableRow({
-                children: colWidths.map((w, i) =>
-                    new TableCell({
-                        borders: BORDER_SOLID,
+                children: colWidths.map((w, i) => {
+                    const cellOpts: any = {
+                        borders,
                         width: { size: w, type: WidthType.DXA },
                         children: rowCells[i] ?? [p('')],
-                    })
-                ),
+                    };
+                    if (cellPadding) {
+                        cellOpts.margins = {
+                            top: cellPadding,
+                            bottom: cellPadding,
+                            left: cellPadding,
+                            right: cellPadding,
+                        };
+                    }
+                    if (styleOpts?.shading) {
+                        cellOpts.shading = { fill: styleOpts.shading };
+                    }
+                    return new TableCell(cellOpts);
+                }),
             })
         ),
     });
@@ -159,57 +329,92 @@ function multiRowFixedTable(colWidths: number[], rowsData: Paragraph[][][]): Tab
 // ---------------------------------------------------------------------------
 // Build header table from DocxAnalysis.header
 // ---------------------------------------------------------------------------
-function buildHeader(header: DocxAnalysis['header']): Table {
-    const lw = convertInchesToTwip(4.5);
-    const rw = PAGE_W - lw;
+function buildHeader(header: DocxAnalysis['header'], pageWidth: number = DEFAULT_PAGE_W): Table {
+    // Calculate column widths
+    let lw: number, rw: number;
+    if (header.table?.columnWidthsPct && header.table.columnWidthsPct.length >= 2) {
+        const total = header.table.columnWidthsPct[0] + header.table.columnWidthsPct[1];
+        lw = Math.round(pageWidth * (header.table.columnWidthsPct[0] / total));
+        rw = pageWidth - lw;
+    } else {
+        lw = convertInchesToTwip(4.5);
+        rw = pageWidth - lw;
+    }
 
     function fieldPara(f: FieldDef): Paragraph {
         const text = ROLE_PLACEHOLDER[f.semanticRole] ?? ROLE_PLACEHOLDER['unknown'];
-        const sz = f.fontSize ?? 11;
-        return p(text, f.bold, sz);
+        return p({
+            text,
+            bold: f.bold,
+            sizePt: f.fontSize ?? 11,
+            font: f.fontFamily,
+            color: f.color,
+        });
     }
 
+    const tableStyle = header.table?.style;
+
     if (header.layout === 'two-column-table') {
-        return fixedTable([lw, rw], [
-            header.left.map(fieldPara),
-            header.right.map(fieldPara),
-        ]);
+        return fixedTable(
+            [lw, rw],
+            [
+                header.left.map(fieldPara),
+                header.right.map(fieldPara),
+            ],
+            tableStyle
+        );
     }
 
     // single-column fallback
     const allFields = [...header.left, ...header.right];
-    const lw2 = PAGE_W;
-    return new Table({
-        width: { size: lw2, type: WidthType.DXA },
-        columnWidths: [lw2],
-        layout: TableLayoutType.FIXED,
-        rows: [new TableRow({
-            children: [new TableCell({
-                borders: BORDER_SOLID,
-                width: { size: lw2, type: WidthType.DXA },
-                children: allFields.map(fieldPara),
-            })],
-        })],
-    });
+    return fixedTable([pageWidth], [allFields.map(fieldPara)], tableStyle);
 }
 
 // ---------------------------------------------------------------------------
 // Build body blocks from a SectionDef
 // ---------------------------------------------------------------------------
-function buildSection(sec: SectionDef): Array<Paragraph | Table> {
+function buildSection(sec: SectionDef, pageWidth: number = DEFAULT_PAGE_W): Array<Paragraph | Table> {
     const result: Array<Paragraph | Table> = [];
     result.push(empty());
-    result.push(sectionHeading(sec.heading, sec.headingFontSize ?? 14));
+    result.push(sectionHeading({
+        text: sec.heading,
+        fontSize: sec.headingFontSize,
+        font: sec.headingFontFamily,
+        color: sec.headingColor,
+        bold: sec.headingBold,
+        alignment: sec.headingAlignment,
+        spacingBefore: sec.headingSpacingBeforePt,
+        spacingAfter: sec.headingSpacingAfterPt,
+    }));
 
     const indTwip = sec.indentPt ? Math.round(sec.indentPt * 20) : 0;
     const bold = sec.contentBold ?? false;
+    const fontSize = sec.contentFontSize ?? 11;
+    const font = sec.contentFontFamily;
+    const color = sec.contentColor;
+    const alignment = sec.contentAlignment;
+    const spacingBefore = sec.contentSpacingBeforePt;
+    const lineSpacing = sec.contentLineSpacingMultiple;
     const raw = SECTION_PLACEHOLDER[sec.key];
+
+    // Helper to create content paragraph with section styling
+    const contentP = (text: string, overrideBold?: boolean, overrideIndent?: number) => p({
+        text,
+        bold: overrideBold !== undefined ? overrideBold : bold,
+        sizePt: fontSize,
+        font,
+        color,
+        alignment,
+        indentTwip: overrideIndent !== undefined ? overrideIndent : indTwip,
+        spacingBefore,
+        lineSpacing,
+    });
 
     switch (sec.contentLayout) {
         // ── flat paragraphs ─────────────────────────────────────────────
         case 'flat-paragraphs': {
             const lines = (raw as string[] | undefined) ?? fallback(sec.key);
-            lines.forEach(line => result.push(p(line, bold, 11, indTwip)));
+            lines.forEach(line => result.push(contentP(line)));
             break;
         }
 
@@ -219,7 +424,7 @@ function buildSection(sec: SectionDef): Array<Paragraph | Table> {
             // First item may be a job/role heading (not indented)
             lines.forEach((line, i) => {
                 const isHeading = i === 0 && /–|•/.test(line);
-                result.push(p(line, isHeading || bold, 11, isHeading ? 0 : indTwip));
+                result.push(contentP(line, isHeading || bold, isHeading ? 0 : undefined));
             });
             break;
         }
@@ -228,43 +433,45 @@ function buildSection(sec: SectionDef): Array<Paragraph | Table> {
         case 'two-column-table': {
             const cols = sec.table?.columns ?? [{ widthPct: 50 }, { widthPct: 50 }];
             const total = cols.reduce((s, c) => s + (c.widthPct ?? 50), 0) || 100;
-            const colWidths = cols.map(c => Math.round(PAGE_W * ((c.widthPct ?? 50) / total)));
+            const colWidths = cols.map(c => Math.round(pageWidth * ((c.widthPct ?? 50) / total)));
             // Fix rounding drift
-            const diff = PAGE_W - colWidths.reduce((a, b) => a + b, 0);
+            const diff = pageWidth - colWidths.reduce((a, b) => a + b, 0);
             colWidths[colWidths.length - 1] += diff;
+
+            const tableStyle = sec.table?.style;
 
             // Skills: array of [label, skills] tuples
             if (sec.key === 'skills') {
                 const rows = SECTION_PLACEHOLDER.skills as unknown as [string, string][];
                 result.push(multiRowFixedTable(colWidths, rows.map(([l, s]) => [
-                    [p(l, true, 11)],
-                    [p(s, false, 11)],
-                ])));
+                    [contentP(l, true)],
+                    [contentP(s, false)],
+                ]), tableStyle));
             }
             // Certifications: array of parallel column items
             else if (sec.key === 'certifications') {
                 const colItems = SECTION_PLACEHOLDER.certifications as unknown as string[][];
                 // colItems[0] = headers row, rest = data rows
                 const colParas: Paragraph[][] = colWidths.map((_, ci) =>
-                    colItems.map((row, ri) => p(row[ci] ?? '', ri === 0, 11))
+                    colItems.map((row, ri) => contentP(row[ci] ?? '', ri === 0))
                 );
-                result.push(fixedTable(colWidths, colParas));
+                result.push(fixedTable(colWidths, colParas, tableStyle));
             }
             // Generic: split sample items across columns
             else {
                 const items = (raw as string[] | undefined) ?? fallback(sec.key);
                 const mid = Math.ceil(items.length / colWidths.length);
                 const colParas = colWidths.map((_, ci) =>
-                    items.slice(ci * mid, (ci + 1) * mid).map(t => p(t, bold, 11))
+                    items.slice(ci * mid, (ci + 1) * mid).map(t => contentP(t))
                 );
-                result.push(fixedTable(colWidths, colParas));
+                result.push(fixedTable(colWidths, colParas, tableStyle));
             }
             break;
         }
 
         default: {
             const lines = (raw as string[] | undefined) ?? fallback(sec.key);
-            lines.forEach(line => result.push(p(line, bold, 11)));
+            lines.forEach(line => result.push(contentP(line)));
         }
     }
 
@@ -334,59 +541,89 @@ function bulletItems(key: string, resume: JsonResume): string[] {
 }
 
 /** Build DOCX section children from a SectionDef using real resume data. */
-function buildSectionFromResume(sec: SectionDef, resume: JsonResume): Array<Paragraph | Table> {
+function buildSectionFromResume(sec: SectionDef, resume: JsonResume, pageWidth: number = DEFAULT_PAGE_W): Array<Paragraph | Table> {
     const result: Array<Paragraph | Table> = [];
     result.push(empty());
-    result.push(sectionHeading(sec.heading, sec.headingFontSize ?? 14));
+    result.push(sectionHeading({
+        text: sec.heading,
+        fontSize: sec.headingFontSize,
+        font: sec.headingFontFamily,
+        color: sec.headingColor,
+        bold: sec.headingBold,
+        alignment: sec.headingAlignment,
+        spacingBefore: sec.headingSpacingBeforePt,
+        spacingAfter: sec.headingSpacingAfterPt,
+    }));
 
     const indTwip = sec.indentPt ? Math.round(sec.indentPt * 20) : 0;
     const bold = sec.contentBold ?? false;
+    const fontSize = sec.contentFontSize ?? 11;
+    const font = sec.contentFontFamily;
+    const color = sec.contentColor;
+    const alignment = sec.contentAlignment;
+    const spacingBefore = sec.contentSpacingBeforePt;
+    const lineSpacing = sec.contentLineSpacingMultiple;
     const key = sec.key.toLowerCase();
+
+    // Helper to create content paragraph with section styling
+    const contentP = (text: string, overrideBold?: boolean, overrideIndent?: number) => p({
+        text,
+        bold: overrideBold !== undefined ? overrideBold : bold,
+        sizePt: fontSize,
+        font,
+        color,
+        alignment,
+        indentTwip: overrideIndent !== undefined ? overrideIndent : indTwip,
+        spacingBefore,
+        lineSpacing,
+    });
 
     switch (sec.contentLayout) {
         case 'flat-paragraphs': {
-            flatLines(key, resume).forEach(line => result.push(p(line, bold, 11, indTwip)));
+            flatLines(key, resume).forEach(line => result.push(contentP(line)));
             break;
         }
         case 'indented-bullets': {
             bulletItems(key, resume).forEach((item, i) => {
                 const isHeading = i === 0 || /[–•]/.test(item.charAt(0)) === false && (resume.work ?? []).some(w => item.startsWith(w.name));
-                result.push(p(item, isHeading || bold, 11, isHeading ? 0 : indTwip));
+                result.push(contentP(item, isHeading || bold, isHeading ? 0 : undefined));
             });
             break;
         }
         case 'two-column-table': {
             const cols = sec.table?.columns ?? [{ widthPct: 50 }, { widthPct: 50 }];
             const total = cols.reduce((s, c) => s + (c.widthPct ?? 50), 0) || 100;
-            const colW = cols.map(c => Math.round(PAGE_W * ((c.widthPct ?? 50) / total)));
-            colW[colW.length - 1] += PAGE_W - colW.reduce((a, b) => a + b, 0); // fix rounding
+            const colW = cols.map(c => Math.round(pageWidth * ((c.widthPct ?? 50) / total)));
+            colW[colW.length - 1] += pageWidth - colW.reduce((a, b) => a + b, 0); // fix rounding
+
+            const tableStyle = sec.table?.style;
 
             if (key === 'skills' || key === 'core skills') {
                 const skillRows = (resume.skills ?? []).map(s =>
-                    [[p(s.name, true, 11)], [p(s.keywords.join(', '), false, 11)]] as [Paragraph[], Paragraph[]]
+                    [[contentP(s.name, true)], [contentP(s.keywords.join(', '), false)]] as [Paragraph[], Paragraph[]]
                 );
-                result.push(multiRowFixedTable(colW, skillRows));
+                result.push(multiRowFixedTable(colW, skillRows, tableStyle));
             } else if (/certif|courses/.test(key)) {
                 const certs = (resume.certificates ?? []).map(c =>
                     `${c.name}${c.issuer ? ` (${c.issuer}${c.date ? `, ${c.date}` : ''})` : ''}`
                 );
                 const mid = Math.ceil(certs.length / 2);
                 result.push(fixedTable(colW, [
-                    certs.slice(0, mid).map(t => p(t, false, 11)),
-                    certs.slice(mid).map(t => p(t, false, 11)),
-                ]));
+                    certs.slice(0, mid).map(t => contentP(t)),
+                    certs.slice(mid).map(t => contentP(t)),
+                ], tableStyle));
             } else {
                 const items = SECTION_PLACEHOLDER[key] ?? fallback(key);
                 const mid = Math.ceil(items.length / 2);
                 result.push(fixedTable(colW, [
-                    items.slice(0, mid).map(t => p(t, bold, 11)),
-                    items.slice(mid).map(t => p(t, bold, 11)),
-                ]));
+                    items.slice(0, mid).map(t => contentP(t)),
+                    items.slice(mid).map(t => contentP(t)),
+                ], tableStyle));
             }
             break;
         }
         default: {
-            flatLines(key, resume).forEach(line => result.push(p(line, bold, 11)));
+            flatLines(key, resume).forEach(line => result.push(contentP(line)));
         }
     }
 
@@ -409,21 +646,48 @@ export async function renderDocxFromAnalysis(
     resume: JsonResume,
     outPath: string,
 ): Promise<void> {
-    // Header
-    const lw = convertInchesToTwip(4.5);
-    const rw = PAGE_W - lw;
+    // Calculate page width from analysis
+    const pageWidthIn = analysis.pageLayout?.widthIn ?? 8.5;
+    const marginLeft = analysis.pageLayout?.marginsIn?.left ?? 0.5;
+    const marginRight = analysis.pageLayout?.marginsIn?.right ?? 0.5;
+    const contentWidth = pageWidthIn - marginLeft - marginRight;
+    const pageWidth = convertInchesToTwip(contentWidth);
 
+    // Build header with resume data
     function fieldPara(f: FieldDef): Paragraph {
         const text = (resumeFieldForRole(f.semanticRole, resume) || ROLE_PLACEHOLDER[f.semanticRole]) ?? '—';
-        return p(text, f.bold, f.fontSize ?? 11);
+        return p({
+            text,
+            bold: f.bold,
+            sizePt: f.fontSize ?? 11,
+            font: f.fontFamily,
+            color: f.color,
+        });
     }
+
+    // Calculate column widths for header
+    let lw: number, rw: number;
+    if (analysis.header.table?.columnWidthsPct && analysis.header.table.columnWidthsPct.length >= 2) {
+        const total = analysis.header.table.columnWidthsPct[0] + analysis.header.table.columnWidthsPct[1];
+        lw = Math.round(pageWidth * (analysis.header.table.columnWidthsPct[0] / total));
+        rw = pageWidth - lw;
+    } else {
+        lw = convertInchesToTwip(contentWidth * 0.6);
+        rw = pageWidth - lw;
+    }
+
+    const tableStyle = analysis.header.table?.style;
 
     let headerEl: Table | Paragraph[];
     if (analysis.header.layout === 'two-column-table') {
-        headerEl = fixedTable([lw, rw], [
-            analysis.header.left.map(fieldPara),
-            analysis.header.right.map(fieldPara),
-        ]);
+        headerEl = fixedTable(
+            [lw, rw],
+            [
+                analysis.header.left.map(fieldPara),
+                analysis.header.right.map(fieldPara),
+            ],
+            tableStyle
+        );
     } else {
         headerEl = [...analysis.header.left, ...analysis.header.right].map(fieldPara);
     }
@@ -433,7 +697,7 @@ export async function renderDocxFromAnalysis(
         : [headerEl];
 
     for (const sec of analysis.sections) {
-        children.push(...buildSectionFromResume(sec, resume));
+        children.push(...buildSectionFromResume(sec, resume, pageWidth));
     }
 
     const doc = new Document({
@@ -441,14 +705,14 @@ export async function renderDocxFromAnalysis(
             properties: {
                 page: {
                     size: {
-                        width: convertInchesToTwip(analysis.pageLayout?.widthIn ?? 8.5),
+                        width: convertInchesToTwip(pageWidthIn),
                         height: convertInchesToTwip(analysis.pageLayout?.heightIn ?? 11),
                     },
                     margin: {
                         top: convertInchesToTwip(analysis.pageLayout?.marginsIn?.top ?? 0.5),
-                        right: convertInchesToTwip(analysis.pageLayout?.marginsIn?.right ?? 0.5),
+                        right: convertInchesToTwip(marginRight),
                         bottom: convertInchesToTwip(analysis.pageLayout?.marginsIn?.bottom ?? 0.5),
-                        left: convertInchesToTwip(analysis.pageLayout?.marginsIn?.left ?? 0.5),
+                        left: convertInchesToTwip(marginLeft),
                     },
                 },
             },
@@ -479,9 +743,16 @@ async function main(): Promise<void> {
 
     const analysis: DocxAnalysis = JSON.parse(fs.readFileSync(inPath, 'utf8'));
 
+    // Calculate page width from analysis
+    const pageWidthIn = analysis.pageLayout?.widthIn ?? 8.5;
+    const marginLeft = analysis.pageLayout?.marginsIn?.left ?? 0.5;
+    const marginRight = analysis.pageLayout?.marginsIn?.right ?? 0.5;
+    const contentWidth = pageWidthIn - marginLeft - marginRight;
+    const pageWidth = convertInchesToTwip(contentWidth);
+
     const children: Array<Paragraph | Table> = [
-        buildHeader(analysis.header),
-        ...analysis.sections.flatMap(sec => buildSection(sec)),
+        buildHeader(analysis.header, pageWidth),
+        ...analysis.sections.flatMap(sec => buildSection(sec, pageWidth)),
     ];
 
     const doc = new Document({
@@ -489,14 +760,14 @@ async function main(): Promise<void> {
             properties: {
                 page: {
                     size: {
-                        width: convertInchesToTwip(analysis.pageLayout?.widthIn ?? 8.5),
+                        width: convertInchesToTwip(pageWidthIn),
                         height: convertInchesToTwip(analysis.pageLayout?.heightIn ?? 11),
                     },
                     margin: {
                         top: convertInchesToTwip(analysis.pageLayout?.marginsIn?.top ?? 0.5),
-                        right: convertInchesToTwip(analysis.pageLayout?.marginsIn?.right ?? 0.5),
+                        right: convertInchesToTwip(marginRight),
                         bottom: convertInchesToTwip(analysis.pageLayout?.marginsIn?.bottom ?? 0.5),
-                        left: convertInchesToTwip(analysis.pageLayout?.marginsIn?.left ?? 0.5),
+                        left: convertInchesToTwip(marginLeft),
                     },
                 },
             },

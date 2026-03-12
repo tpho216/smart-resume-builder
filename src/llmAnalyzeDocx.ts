@@ -31,6 +31,8 @@ export interface FieldDef {
     // email | phone | linkedin | github | portfolio | unknown
     bold: boolean;
     fontSize?: number;      // pt
+    fontFamily?: string;    // e.g. "Calibri", "Arial"
+    color?: string;         // hex color e.g. "000000"
     sample: string;         // text snippet from original
 }
 
@@ -39,11 +41,25 @@ export interface TableColDef {
     widthPct?: number;
 }
 
+export interface TableStyle {
+    borders: 'all' | 'horizontal' | 'vertical' | 'none';
+    borderColor?: string;   // hex color
+    borderWidthPt?: number;
+    cellPaddingPt?: number;
+    cellSpacingPt?: number;
+    shading?: string;       // hex color for cell background
+}
+
 export interface SectionDef {
     key: string;            // summary | experience | education | skills | certifications | interests | …
     heading: string;        // exact heading text from doc
     headingBold: boolean;
     headingFontSize?: number;
+    headingFontFamily?: string;
+    headingColor?: string;  // hex color
+    headingAlignment?: 'left' | 'center' | 'right' | 'justify';
+    headingSpacingBeforePt?: number;
+    headingSpacingAfterPt?: number;
     contentLayout:
     | 'indented-bullets'
     | 'two-column-table'
@@ -51,10 +67,17 @@ export interface SectionDef {
     | 'definition-list';
     indentPt?: number;
     contentBold?: boolean;
+    contentFontSize?: number;
+    contentFontFamily?: string;
+    contentColor?: string;
+    contentAlignment?: 'left' | 'center' | 'right' | 'justify';
+    contentSpacingBeforePt?: number;
+    contentLineSpacingMultiple?: number;  // e.g. 1.0, 1.15, 1.5
     table?: {
         rows: number;
         cols: number;
         columns: TableColDef[];
+        style?: TableStyle;
     };
     sampleItems: string[];
 }
@@ -70,6 +93,11 @@ export interface DocxAnalysis {
         layout: 'two-column-table' | 'single-column';
         left: FieldDef[];
         right: FieldDef[];
+        table?: {
+            widthPct?: number;  // % of page width
+            columnWidthsPct?: number[];  // % distribution between columns
+            style?: TableStyle;
+        };
     };
     sections: SectionDef[];
     notes: string;   // LLM free-text observations
@@ -79,7 +107,7 @@ export interface DocxAnalysis {
 // DOCX XML extraction (pizzip)
 // ---------------------------------------------------------------------------
 
-function extractXmlText(docxPath: string): { paragraphSummary: string; tablesSummary: string; styleNames: string[] } {
+function extractXmlText(docxPath: string): { paragraphSummary: string; tablesSummary: string; styleNames: string[]; pageLayoutInfo: string } {
     let PizZip: new (data: Buffer) => any;
     try { PizZip = require('pizzip'); }
     catch { throw new Error('pizzip not installed. Run: npm install pizzip fast-xml-parser'); }
@@ -113,6 +141,38 @@ function extractXmlText(docxPath: string): { paragraphSummary: string; tablesSum
     const body = doc?.['w:document']?.['w:body'];
     if (!body) throw new Error('Could not find w:body in document.xml');
 
+    // ── Extract page layout from sectPr ───────────────────────────────────
+    const sectPr = body?.['w:sectPr'];
+    let pageLayoutInfo = 'Page layout: ';
+    if (sectPr) {
+        const pgSz = sectPr?.['w:pgSz'];
+        const pgMar = sectPr?.['w:pgMar'];
+        const cols = sectPr?.['w:cols'];
+
+        if (pgSz) {
+            const width = parseInt(pgSz?.['@_w:w'] ?? '12240', 10) / 1440; // default Letter width
+            const height = parseInt(pgSz?.['@_w:h'] ?? '15840', 10) / 1440; // default Letter height
+            pageLayoutInfo += `${width.toFixed(2)}" × ${height.toFixed(2)}"  `;
+        } else {
+            pageLayoutInfo += '8.5" × 11" (default)  ';
+        }
+
+        if (pgMar) {
+            const top = Math.round(parseInt(pgMar?.['@_w:top'] ?? '1440', 10) / 1440 * 100) / 100;
+            const right = Math.round(parseInt(pgMar?.['@_w:right'] ?? '1440', 10) / 1440 * 100) / 100;
+            const bottom = Math.round(parseInt(pgMar?.['@_w:bottom'] ?? '1440', 10) / 1440 * 100) / 100;
+            const left = Math.round(parseInt(pgMar?.['@_w:left'] ?? '1440', 10) / 1440 * 100) / 100;
+            pageLayoutInfo += `margins: ${top}" top, ${right}" right, ${bottom}" bottom, ${left}" left  `;
+        } else {
+            pageLayoutInfo += 'margins: 1" all sides (default)  ';
+        }
+
+        const numCols = parseInt(cols?.['@_w:num'] ?? '1', 10);
+        pageLayoutInfo += `columns: ${numCols}`;
+    } else {
+        pageLayoutInfo += '8.5" × 11", margins: 1" all sides, columns: 1 (defaults)';
+    }
+
     const styleNames: string[] = [...new Set(
         [...styleMap.values()].filter(n => !['Normal', 'DefaultParagraphFont', 'NormalTable', 'TableNormal'].includes(n))
     )];
@@ -127,15 +187,24 @@ function extractXmlText(docxPath: string): { paragraphSummary: string; tablesSum
         const jc = pPr?.['w:jc']?.['@_w:val'] ?? 'left';
         const spacing = pPr?.['w:spacing'];
         const spaceBefore = spacing ? Math.round(parseInt(spacing?.['@_w:before'] ?? '0', 10) / 20) : 0;
+        const spaceAfter = spacing ? Math.round(parseInt(spacing?.['@_w:after'] ?? '0', 10) / 20) : 0;
+        const lineSpacing = spacing?.['@_w:line'];
+        const lineRule = spacing?.['@_w:lineRule'];
 
         let text = '';
         let bold = false;
         let sz: number | undefined;
+        let color: string | undefined;
+        let fontFamily: string | undefined;
         for (const r of (Array.isArray(p?.['w:r']) ? p['w:r'] : [])) {
             const rPr = r?.['w:rPr'];
             if (rPr?.['w:b'] !== undefined) bold = true;
             const szNode = rPr?.['w:sz'];
             if (szNode) sz = Math.round(parseInt(szNode?.['@_w:val'] ?? '0', 10) / 2);
+            const colorNode = rPr?.['w:color'];
+            if (colorNode) color = colorNode?.['@_w:val'];
+            const fontNode = rPr?.['w:rFonts'];
+            if (fontNode) fontFamily = fontNode?.['@_w:ascii'] || fontNode?.['@_w:hAnsi'];
             for (const t of (Array.isArray(r?.['w:t']) ? r['w:t'] : [r?.['w:t']]).filter(Boolean)) {
                 text += typeof t === 'string' ? t : (t?.['#text'] ?? '');
             }
@@ -152,10 +221,15 @@ function extractXmlText(docxPath: string): { paragraphSummary: string; tablesSum
         if (!text.trim()) return '';
         const boldMark = bold ? ' BOLD' : '';
         const szMark = sz ? ` sz=${sz}pt` : '';
+        const colorMark = color && color !== 'auto' && color !== '000000' ? ` color=${color}` : '';
+        const fontMark = fontFamily ? ` font="${fontFamily}"` : '';
         const indMark = parseInt(indLeft) > 0 ? ` ind=${indLeft}pt` : '';
-        const spMark = spaceBefore > 0 ? ` spaceBefore=${spaceBefore}pt` : '';
+        const spBeforeMark = spaceBefore > 0 ? ` spaceBefore=${spaceBefore}pt` : '';
+        const spAfterMark = spaceAfter > 0 ? ` spaceAfter=${spaceAfter}pt` : '';
+        const lineSpacingMark = lineSpacing ? ` lineSpacing=${lineSpacing}${lineRule ? `(${lineRule})` : ''}` : '';
+        const alignMark = jc !== 'left' ? ` align=${jc}` : '';
         const preview = text.slice(0, 80).replace(/\n/g, ' ');
-        return `${prefix}  [${styleName}]${boldMark}${szMark}${indMark}${spMark}  "${preview}"`;
+        return `${prefix}  [${styleName}]${boldMark}${szMark}${colorMark}${fontMark}${indMark}${spBeforeMark}${spAfterMark}${lineSpacingMark}${alignMark}  "${preview}"`;
     }
 
     // ── Walk body ─────────────────────────────────────────────────────────
@@ -175,14 +249,45 @@ function extractXmlText(docxPath: string): { paragraphSummary: string; tablesSum
         const tblPr = tbl?.['w:tblPr'];
         const tblW = tblPr?.['w:tblW'];
         const width = tblW ? (parseInt(tblW?.['@_w:w'] ?? '0', 10) / 1440).toFixed(2) : '?';
+
+        // Border details
         const tblBorders = tblPr?.['w:tblBorders'];
-        let hasBorder = false;
+        let borderStyle = 'none';
+        let borderColor: string | undefined;
+        let borderWidth: number | undefined;
         if (tblBorders) {
-            for (const side of ['top', 'left', 'bottom', 'right']) {
-                const v = tblBorders?.[`w:${side}`]?.['@_w:val'];
-                if (v && v !== 'nil' && v !== 'none') { hasBorder = true; break; }
+            const hasBorder: string[] = [];
+            for (const side of ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']) {
+                const border = tblBorders?.[`w:${side}`];
+                const val = border?.['@_w:val'];
+                if (val && val !== 'nil' && val !== 'none') {
+                    hasBorder.push(side);
+                    if (!borderColor) borderColor = border?.['@_w:color'];
+                    if (!borderWidth) {
+                        const sz = border?.['@_w:sz'];
+                        if (sz) borderWidth = Math.round(parseInt(sz, 10) / 8); // convert to pt
+                    }
+                }
+            }
+            if (hasBorder.length > 0) {
+                if (hasBorder.includes('top') && hasBorder.includes('bottom') &&
+                    hasBorder.includes('left') && hasBorder.includes('right')) {
+                    borderStyle = 'all';
+                } else if (hasBorder.includes('insideH')) {
+                    borderStyle = 'horizontal';
+                } else if (hasBorder.includes('insideV')) {
+                    borderStyle = 'vertical';
+                }
             }
         }
+
+        // Cell spacing and padding
+        const cellSpacing = tblPr?.['w:tblCellSpacing']?.['@_w:w'];
+        const cellSpacingPt = cellSpacing ? Math.round(parseInt(cellSpacing, 10) / 20) : 0;
+        const cellMargin = tblPr?.['w:tblCellMar'];
+        const cellPadding = cellMargin?.['w:left']?.['@_w:w'] || cellMargin?.['w:top']?.['@_w:w'];
+        const cellPaddingPt = cellPadding ? Math.round(parseInt(cellPadding, 10) / 20) : 0;
+
         const rows = Array.isArray(tbl?.['w:tr']) ? tbl['w:tr'] : [];
         const numCols = rows.reduce((m: number, r: any) => Math.max(m, (Array.isArray(r?.['w:tc']) ? r['w:tc'] : []).length), 0);
         const colWidths: string[] = [];
@@ -190,7 +295,14 @@ function extractXmlText(docxPath: string): { paragraphSummary: string; tablesSum
             const w = parseInt(gc?.['@_w:w'] ?? '0', 10);
             colWidths.push((w / 1440).toFixed(2) + '"');
         }
-        tableLines.push(`\nTable ${tIdx}: ${rows.length} rows × ${numCols} cols  width=${width}"  borders=${hasBorder ? 'yes' : 'none'}  col-widths=[${colWidths.join(', ')}]`);
+
+        const borderInfo = borderStyle !== 'none'
+            ? ` borders=${borderStyle}${borderColor ? ` color=${borderColor}` : ''}${borderWidth ? ` width=${borderWidth}pt` : ''}`
+            : ' borders=none';
+        const paddingInfo = cellPaddingPt > 0 ? ` cellPadding=${cellPaddingPt}pt` : '';
+        const spacingInfo = cellSpacingPt > 0 ? ` cellSpacing=${cellSpacingPt}pt` : '';
+
+        tableLines.push(`\nTable ${tIdx}: ${rows.length} rows × ${numCols} cols  width=${width}"${borderInfo}${paddingInfo}${spacingInfo}  col-widths=[${colWidths.join(', ')}]`);
 
         rows.forEach((tr: any, ri: number) => {
             const cells = Array.isArray(tr?.['w:tc']) ? tr['w:tc'] : [];
@@ -198,8 +310,10 @@ function extractXmlText(docxPath: string): { paragraphSummary: string; tablesSum
             cells.forEach((tc: any, ci: number) => {
                 const tcW = tc?.['w:tcPr']?.['w:tcW'];
                 const cellW = tcW ? (parseInt(tcW?.['@_w:w'] ?? '0', 10) / 1440).toFixed(2) : '?';
-                tableLines.push(`    Cell[${ci + 1}] width=${cellW}":`);
-                for (const p of (Array.isArray(tc?.['w:p']) ? tc['w:p'] : [])) {
+                const shd = tc?.['w:tcPr']?.['w:shd'];
+                const shadingColor = shd?.['@_w:fill'];
+                const shadingInfo = shadingColor && shadingColor !== 'auto' ? ` shading=${shadingColor}` : '';
+                tableLines.push(`    Cell[${ci + 1}] width=${cellW}"${shadingInfo}:`); for (const p of (Array.isArray(tc?.['w:p']) ? tc['w:p'] : [])) {
                     const line = summarisePara(p, '  ');
                     if (line) tableLines.push('  ' + line);
                 }
@@ -211,6 +325,7 @@ function extractXmlText(docxPath: string): { paragraphSummary: string; tablesSum
         paragraphSummary: paraLines.join('\n'),
         tablesSummary: tableLines.join('\n'),
         styleNames,
+        pageLayoutInfo,
     };
 }
 
@@ -287,8 +402,12 @@ function buildAnalysisPrompt(
     paragraphSummary: string,
     tablesSummary: string,
     styleNames: string[],
+    pageLayoutInfo: string,
 ): string {
     return `Analyse the following DOCX resume structure dump and return a JSON object matching the schema below.
+
+=== PAGE LAYOUT ===
+${pageLayoutInfo}
 
 === PARAGRAPH STYLES DEFINED ===
 ${styleNames.join(', ') || '(only Normal)'}
@@ -304,10 +423,10 @@ Return a single JSON object with this exact shape:
 
 {
   "pageLayout": {
-    "widthIn": <number>,
-    "heightIn": <number>,
+    "widthIn": <number (typically 8.5 for letter, 8.27 for A4)>,
+    "heightIn": <number (typically 11 for letter, 11.69 for A4)>,
     "marginsIn": { "top": <number>, "right": <number>, "bottom": <number>, "left": <number> },
-    "columns": <number>
+    "columns": <number (1 for single column, 2 for dual column)>
   },
   "header": {
     "layout": "two-column-table" | "single-column",
@@ -316,6 +435,8 @@ Return a single JSON object with this exact shape:
         "semanticRole": "name|title|technologies|tagline|unknown",
         "bold": true|false,
         "fontSize": <number|null>,
+        "fontFamily": "<string|null (from font= markers)>",
+        "color": "<hex|null (from color= markers)>",
         "sample": "<text from dump>"
       }
     ],
@@ -324,9 +445,23 @@ Return a single JSON object with this exact shape:
         "semanticRole": "location|residency|email|phone|linkedin|github|portfolio|unknown",
         "bold": true|false,
         "fontSize": <number|null>,
+        "fontFamily": "<string|null>",
+        "color": "<hex|null>",
         "sample": "<text from dump>"
       }
-    ]
+    ],
+    "table": {
+      "widthPct": <number|null (% of page width, derive from width values in dump)>,
+      "columnWidthsPct": [<number>, <number>],
+      "style": {
+        "borders": "all|horizontal|vertical|none",
+        "borderColor": "<hex|null>",
+        "borderWidthPt": <number|null>,
+        "cellPaddingPt": <number|null>,
+        "cellSpacingPt": <number|null>,
+        "shading": "<hex|null (background color)>"
+      }
+    }
   },
   "sections": [
     {
@@ -334,15 +469,34 @@ Return a single JSON object with this exact shape:
       "heading": "<exact heading text>",
       "headingBold": true|false,
       "headingFontSize": <number|null>,
+      "headingFontFamily": "<string|null>",
+      "headingColor": "<hex|null>",
+      "headingAlignment": "left|center|right|justify",
+      "headingSpacingBeforePt": <number|null>,
+      "headingSpacingAfterPt": <number|null>,
       "contentLayout": "indented-bullets|two-column-table|flat-paragraphs|definition-list",
       "indentPt": <number|null>,
       "contentBold": true|false|null,
+      "contentFontSize": <number|null>,
+      "contentFontFamily": "<string|null>",
+      "contentColor": "<hex|null>",
+      "contentAlignment": "left|center|right|justify",
+      "contentSpacingBeforePt": <number|null>,
+      "contentLineSpacingMultiple": <number|null (e.g. 1.0, 1.15, 1.5)>,
       "table": <null | {
         "rows": <number>,
         "cols": <number>,
         "columns": [
           { "role": "<description of this column's role>", "widthPct": <approximate % of table width> }
-        ]
+        ],
+        "style": {
+          "borders": "all|horizontal|vertical|none",
+          "borderColor": "<hex|null>",
+          "borderWidthPt": <number|null>,
+          "cellPaddingPt": <number|null>,
+          "cellSpacingPt": <number|null>,
+          "shading": "<hex|null>"
+        }
       }>,
       "sampleItems": ["<first item>", "<second item>"]
     }
@@ -351,13 +505,15 @@ Return a single JSON object with this exact shape:
 }
 
 IMPORTANT rules:
-- "header" refers to the name/contact block at the very top of the resume.  It may be inside Table 1.
-- Map every field in the header table to its semantic role.  Common roles: name, title, technologies (tech stack tagline), location, residency (visa/citizenship status), email, phone, linkedin, github, portfolio.
+- "header" refers to the name/contact block at the very top of the resume. It may be inside Table 1.
+- Map every field in the header table to its semantic role. Common roles: name, title, technologies (tech stack tagline), location, residency (visa/citizenship status), email, phone, linkedin, github, portfolio.
+- Extract ALL styling details from the dump: font sizes (sz=), fonts (font=), colors (color=), indentation (ind=), spacing (spaceBefore=, spaceAfter=), alignment (align=), line spacing (lineSpacing=).
+- For tables, extract border style (borders=), border color (color=), border width (width=), cell padding (cellPadding=), cell spacing (cellSpacing=), and shading colors (shading=).
 - Only include sections that appear AFTER the header.
 - For tables used as layout containers (skills grid, certs split by year), set contentLayout="two-column-table" and fill in the "table" field.
-- Font sizes come from sz= markers in the dump (already converted to pt).
-- indentPt is the indent= value from the dump (already in pt).
-- Use null for optional numeric fields when not present in the dump.`;
+- Page layout: Use standard values if not explicitly shown in dump (Letter: 8.5×11", A4: 8.27×11.69"). Standard margins are typically 1" (top/bottom/left/right).
+- Colors are hex without # prefix (e.g. "000000" for black, "0070C0" for blue).
+- Use null for optional fields when not present in the dump.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -622,8 +778,8 @@ export async function analyzeDocxTemplate(
     fs.mkdirSync(cacheDir, { recursive: true });
 
     console.log(`  [llmAnalyzeDocx] Extracting structure from: ${docxPath}`);
-    const { paragraphSummary, tablesSummary, styleNames } = extractXmlText(docxPath);
-    const userPrompt = buildAnalysisPrompt(paragraphSummary, tablesSummary, styleNames);
+    const { paragraphSummary, tablesSummary, styleNames, pageLayoutInfo } = extractXmlText(docxPath);
+    const userPrompt = buildAnalysisPrompt(paragraphSummary, tablesSummary, styleNames, pageLayoutInfo);
 
     console.log(`  [llmAnalyzeDocx] Calling LLM (${providerName} / ${providerCfg.model})...`);
     const rawJson = await callLlm(providerCfg, SYSTEM_PROMPT, userPrompt);
@@ -649,8 +805,9 @@ async function main(): Promise<void> {
     const docxPath = argv.find(a => !a.startsWith('-'))
         ?? path.resolve(process.cwd(), 'inputs/resume_templates/resume_template_2.docx');
 
+    const providerIdx = argv.indexOf('--provider');
     const providerName = (argv.find(a => a.startsWith('--provider='))?.split('=')[1])
-        ?? (argv[argv.indexOf('--provider') + 1])
+        ?? (providerIdx >= 0 ? argv[providerIdx + 1] : undefined)
         ?? 'github-copilot';
 
     // Output paths
