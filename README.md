@@ -43,7 +43,7 @@ Create `inputs/tasks/my_task.json`:
 
   // Optional — pick one:
   "theme":        "elegant",                                    // named JSON Resume theme
-  "templateDocx": "inputs/job_templates/resume_template_2.docx", // LLM-analysed DOCX template
+  "templateDocx": "inputs/resume_templates/resume_template_2.docx", // LLM-analysed DOCX template
 
   "llm": {
     "provider": "github-copilot"   // key from config/llm_providers.json
@@ -96,10 +96,10 @@ Process every file in `inputs/job_ads/`:
 
 ## DOCX templates
 
-Drop `.docx` files in `inputs/job_templates/` and reference one in the task:
+Drop `.docx` files in `inputs/resume_templates/` and reference one in the task:
 
 ```jsonc
-"templateDocx": "inputs/job_templates/resume_template_2.docx"
+"templateDocx": "inputs/resume_templates/resume_template_2.docx"
 ```
 
 The pipeline uses the LLM to analyse the template's layout (header columns, section order, font sizes) and renders your tailored resume into it. The analysis is cached in `outputs/llm_docx_analysis/` — delete the cache file to force a re-analysis.

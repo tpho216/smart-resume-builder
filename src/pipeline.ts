@@ -27,7 +27,7 @@
  *
  *   # Phase 2 via CLI:
  *   node dist/pipeline.js --task inputs/tasks/task_3.json
- *   node dist/pipeline.js --template-resume inputs/job_templates/resume.docx --job-ad ad.txt
+ *   node dist/pipeline.js --template-resume inputs/resume_templates/resume.docx --job-ad ad.txt
  *
  *   # Named theme:
  *   node dist/pipeline.js --theme even --job-ad ad.txt

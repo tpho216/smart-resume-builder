@@ -647,7 +647,7 @@ export async function analyzeDocxTemplate(
 async function main(): Promise<void> {
     const argv = process.argv.slice(2);
     const docxPath = argv.find(a => !a.startsWith('-'))
-        ?? path.resolve(process.cwd(), 'inputs/job_templates/resume_template_2.docx');
+        ?? path.resolve(process.cwd(), 'inputs/resume_templates/resume_template_2.docx');
 
     const providerName = (argv.find(a => a.startsWith('--provider='))?.split('=')[1])
         ?? (argv[argv.indexOf('--provider') + 1])
