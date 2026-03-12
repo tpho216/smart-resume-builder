@@ -43,7 +43,7 @@
  *   --all                     Process every .txt file in inputs/job_ads/
  *   --output <dir>            Output root directory
  *   --provider <name>         LLM provider (overrides task.llm.provider)
- *   --model <name>            LLM model name (overrides task.llm.providers[provider].model)
+ *   --model <name>            LLM model name (overrides provider default from llm_providers.json)
  *   --template-resume <path>  Template resume (PDF/DOCX) → Phase 2 flow
  *   --theme <name>            Named JSON Resume theme (e.g. "elegant", "even")
  */
@@ -61,7 +61,7 @@ import { calculateScore } from './scoreResume';
 import { parseUploadedResume } from './parseUploadedResume';
 import { analyzeStructure } from './analyzeStructure';
 import { generateTheme, previewWithTheme } from './generateTheme';
-import type { JsonResume, LlmConfig, PipelineResult, TaskConfig, StructureAnalysis } from './types';
+import type { JsonResume, TaskLlmConfig, PipelineResult, TaskConfig, StructureAnalysis } from './types';
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -166,7 +166,7 @@ interface ResolvedConfig {
     baseResumePath: string;
     jobAdPaths: string[];
     outputsDir: string;
-    llmConfig?: LlmConfig;
+    llmConfig?: TaskLlmConfig;
     description?: string;
     /** Phase 2: path to a template resume whose layout should be replicated. */
     templateResumePath?: string;
@@ -205,19 +205,13 @@ function resolveConfig(cli: CliArgs, task?: TaskConfig): ResolvedConfig {
         }
     }
 
-    let llmConfig: LlmConfig | undefined = task?.llm ? { ...task.llm } : undefined;
+    let llmConfig: TaskLlmConfig | undefined = task?.llm ? { ...task.llm } : undefined;
     if (llmConfig) {
         if (cli.provider) llmConfig = { ...llmConfig, provider: cli.provider };
-        if (cli.model && llmConfig.providers) {
-            const providerName = llmConfig.provider;
-            llmConfig = {
-                ...llmConfig,
-                providers: {
-                    ...llmConfig.providers,
-                    [providerName]: { ...llmConfig.providers[providerName], model: cli.model },
-                },
-            };
-        }
+        if (cli.model) llmConfig = { ...llmConfig, model: cli.model };
+    } else if (cli.provider) {
+        // Provider specified on CLI with no task file
+        llmConfig = { provider: cli.provider, ...(cli.model && { model: cli.model }) };
     }
 
     return {
@@ -251,6 +245,13 @@ async function runPipeline(
         : path.join(config.outputsDir, `job_${jobName}`);
 
     fs.mkdirSync(outDir, { recursive: true });
+
+    // Wipe stale output files from previous runs so old names don't linger.
+    for (const f of fs.readdirSync(outDir)) {
+        if (/\.(html|pdf|docx)$/i.test(f)) {
+            fs.rmSync(path.join(outDir, f));
+        }
+    }
 
     const isPhase2 = !!config.templateResumePath;
     const phaseLabel = isPhase2 ? 'Phase 2' : 'Phase 1';
@@ -328,7 +329,16 @@ async function runPipeline(
     // ── Step 3: Render HTML + PDF + DOCX ─────────────────────
     console.log(`\n[${stepOffset + 3}/${totalSteps}] Rendering resume...`);
     const name = (tailored.basics && tailored.basics.name) || 'Resume';
-    const safeName = name.replace(/\s+/g, '_');
+    // Compact name: spaces removed → "Peter Ho" → "PeterHo"
+    const compactName = name.replace(/\s+/g, '');
+
+    // Theme suffix for HTML/PDF/DOCX (named theme or phase-2 template resume)
+    const themeSuffix = config.theme
+        ? `_${config.theme}`
+        : config.templateResumePath
+            ? `_${path.basename(config.templateResumePath).replace(/\.[^.]+$/, '')}`
+            : '';
+    const baseName = `${compactName}_Resume${themeSuffix}`;
 
     let html: string;
     if (customThemeJs) {
@@ -344,11 +354,11 @@ async function runPipeline(
         html = renderToHtml(tailored);
     }
 
-    const htmlPath = path.join(outDir, `Resume_${safeName}.html`);
+    const htmlPath = path.join(outDir, `${baseName}.html`);
     fs.writeFileSync(htmlPath, html);
     console.log(`       HTML → ${htmlPath}`);
 
-    const pdfPath = path.join(outDir, `Resume_${safeName}.pdf`);
+    const pdfPath = path.join(outDir, `${baseName}.pdf`);
     const pdfOk = await renderToPdf(html, pdfPath);
     if (pdfOk) {
         console.log(`       PDF  → ${pdfPath}`);
@@ -356,7 +366,7 @@ async function runPipeline(
         console.log('       PDF skipped (puppeteer not available)');
     }
 
-    const docxPath = path.join(outDir, `Resume_${safeName}.docx`);
+    const docxPath = path.join(outDir, `${baseName}.docx`);
     const docxBuffer = await renderToDocx(tailored, structure);
     fs.writeFileSync(docxPath, docxBuffer);
     console.log(`       DOCX → ${docxPath}`);
@@ -367,9 +377,11 @@ async function runPipeline(
         console.log(`       Template: ${config.templateDocxPath}`);
         const analysis = await analyzeDocxTemplate(
             config.templateDocxPath,
-            path.resolve(process.cwd(), 'inputs/tasks/task_1.json'),
+            config.llmConfig?.provider,
         );
-        const tplDocxPath = path.join(outDir, `Resume_${safeName}_template.docx`);
+        // Name: PeterHo_Resume_<template-filename-without-ext>
+        const tplSuffix = path.basename(config.templateDocxPath, '.docx');
+        const tplDocxPath = path.join(outDir, `${compactName}_Resume_${tplSuffix}.docx`);
         await renderDocxFromAnalysis(analysis, tailored, tplDocxPath);
         console.log(`       Template DOCX → ${tplDocxPath}`);
     }
@@ -474,9 +486,8 @@ async function main(): Promise<void> {
         console.log(`Theme:       ${config.theme}`);
     }
     if (config.llmConfig) {
-        const provider = config.llmConfig.provider;
-        const model = config.llmConfig.providers?.[provider]?.model ?? 'default';
-        console.log(`LLM:         ${provider} / ${model}`);
+        const { provider, model } = config.llmConfig;
+        console.log(`LLM:         ${provider}${model ? ` / ${model}` : ''}`);
     }
 
     const results: PipelineResult[] = [];

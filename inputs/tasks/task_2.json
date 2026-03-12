@@ -7,30 +7,6 @@
     "outputDir": "outputs",
     "templateDocx": "inputs/job_templates/resume_template_2.docx",
     "llm": {
-        "provider": "github-copilot",
-        "promptFile": "config/llm-prompt.md",
-        "providers": {
-            "openai": {
-                "model": "gpt-4o",
-                "apiKeyEnv": "OPENAI_API_KEY",
-                "baseUrl": "https://api.openai.com/v1",
-                "maxTokens": 4096,
-                "temperature": 0.3
-            },
-            "anthropic": {
-                "model": "claude-sonnet-4-20250514",
-                "apiKeyEnv": "ANTHROPIC_API_KEY",
-                "baseUrl": "https://api.anthropic.com/v1",
-                "maxTokens": 4096,
-                "temperature": 0.3
-            },
-            "github-copilot": {
-                "model": "gpt-4o",
-                "apiKeyEnv": "GITHUB_TOKEN",
-                "baseUrl": "https://models.inference.ai.azure.com",
-                "maxTokens": 4096,
-                "temperature": 0.3
-            }
-        }
+        "provider": "github-copilot"
     }
 }

@@ -18,36 +18,84 @@ import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
 import https from 'https';
-import type { JsonResume, Seniority, LlmConfig, LlmProviderConfig } from './types';
+import type { JsonResume, Seniority, TaskLlmConfig, LlmProviderConfig } from './types';
 
 // ---------------------------------------------------------------------------
-// Config loading
+// Providers registry  (config/llm_providers.json)
 // ---------------------------------------------------------------------------
-const LEGACY_CONFIG_PATH = path.join(__dirname, '..', 'config', 'llm-config.json');
+const PROVIDERS_PATH = path.join(__dirname, '..', 'config', 'llm_providers.json');
 const DEFAULT_PROMPT_PATH = path.join(__dirname, '..', 'config', 'llm-prompt.md');
 
-/**
- * Load LLM config from the legacy global file (config/llm-config.json).
- * Prefer passing a config object from a task file instead.
- */
-export function loadConfig(): LlmConfig {
-    if (!fs.existsSync(LEGACY_CONFIG_PATH)) {
-        throw new Error(
-            `LLM config not found: ${LEGACY_CONFIG_PATH}\n` +
-            `Either create config/llm-config.json or use a task file with an "llm" section.`
-        );
-    }
-    return JSON.parse(fs.readFileSync(LEGACY_CONFIG_PATH, 'utf-8'));
+interface ProvidersFile {
+    defaultProvider?: string;
+    promptFile?: string;
+    providers: Record<string, LlmProviderConfig>;
 }
 
-export function loadPromptTemplate(config: LlmConfig): string {
-    const promptPath = config.promptFile
-        ? path.resolve(__dirname, '..', config.promptFile)
-        : DEFAULT_PROMPT_PATH;
-    if (!fs.existsSync(promptPath)) {
-        throw new Error(`Prompt template not found: ${promptPath}`);
+function loadProvidersFile(): ProvidersFile {
+    if (!fs.existsSync(PROVIDERS_PATH)) {
+        throw new Error(
+            `LLM providers config not found: ${PROVIDERS_PATH}\n` +
+            `Create config/llm_providers.json with a "providers" object.`
+        );
     }
-    return fs.readFileSync(promptPath, 'utf-8');
+    return JSON.parse(fs.readFileSync(PROVIDERS_PATH, 'utf-8'));
+}
+
+/**
+ * Resolve the active provider config by merging the global registry entry
+ * with any per-field overrides supplied in the task's llm section.
+ */
+function resolveProviderConfig(taskLlm: TaskLlmConfig): {
+    providerCfg: LlmProviderConfig;
+    promptFile: string;
+    providerName: string;
+} {
+    const file = loadProvidersFile();
+    const base = file.providers[taskLlm.provider];
+    if (!base) {
+        const available = Object.keys(file.providers).join(', ');
+        throw new Error(
+            `Provider "${taskLlm.provider}" not found in ${PROVIDERS_PATH}.\n` +
+            `Available: ${available}`
+        );
+    }
+    // Shallow-merge task-level field overrides over the base provider entry
+    const providerCfg: LlmProviderConfig = {
+        ...base,
+        ...(taskLlm.model !== undefined && { model: taskLlm.model }),
+        ...(taskLlm.baseUrl !== undefined && { baseUrl: taskLlm.baseUrl }),
+        ...(taskLlm.maxTokens !== undefined && { maxTokens: taskLlm.maxTokens }),
+        ...(taskLlm.temperature !== undefined && { temperature: taskLlm.temperature }),
+    };
+    const promptFile = taskLlm.promptFile
+        ? path.resolve(__dirname, '..', taskLlm.promptFile)
+        : file.promptFile
+            ? path.resolve(__dirname, '..', file.promptFile)
+            : DEFAULT_PROMPT_PATH;
+    return { providerCfg, promptFile, providerName: taskLlm.provider };
+}
+
+/**
+ * Load the default task config for CLI use (reads defaultProvider from
+ * config/llm_providers.json so no task file is required).
+ */
+export function loadConfig(): TaskLlmConfig {
+    const file = loadProvidersFile();
+    if (!file.defaultProvider) {
+        throw new Error(
+            `No "defaultProvider" set in ${PROVIDERS_PATH}.\n` +
+            `Add it or use --task <file> to specify a task.`
+        );
+    }
+    return { provider: file.defaultProvider };
+}
+
+function loadPromptTemplateFromPath(promptFile: string): string {
+    if (!fs.existsSync(promptFile)) {
+        throw new Error(`Prompt template not found: ${promptFile}`);
+    }
+    return fs.readFileSync(promptFile, 'utf-8');
 }
 
 // ---------------------------------------------------------------------------
@@ -278,17 +326,12 @@ export async function llmTailorResume(
     jobAdText: string,
     keywords: string[],
     seniority: Seniority,
-    inlineConfig?: LlmConfig,
+    inlineConfig?: TaskLlmConfig,
 ): Promise<JsonResume> {
-    const config = inlineConfig ?? loadConfig();
-    const template = loadPromptTemplate(config);
+    const taskLlm = inlineConfig ?? loadConfig();
+    const { providerCfg, promptFile, providerName } = resolveProviderConfig(taskLlm);
+    const template = loadPromptTemplateFromPath(promptFile);
     const prompt = buildPrompt(template, { baseResume, jobAdText, keywords, seniority });
-
-    const providerName = config.provider;
-    const providerCfg = config.providers[providerName];
-    if (!providerCfg) {
-        throw new Error(`Unknown provider "${providerName}" in config. Available: ${Object.keys(config.providers).join(', ')}`);
-    }
 
     let rawResponse: string;
     if (providerName === 'openai' || providerName === 'github-copilot') {

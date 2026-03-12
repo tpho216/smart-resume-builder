@@ -299,10 +299,24 @@ export interface LlmProviderConfig {
     temperature: number;
 }
 
-export interface LlmConfig {
+/**
+ * Flat task-facing LLM config — specify a provider key plus optional per-field
+ * overrides. Full provider details (model, API keys, URLs) live in
+ * config/llm_providers.json so they are never duplicated across task files.
+ */
+export interface TaskLlmConfig {
+    /** Key matching an entry in config/llm_providers.json. */
     provider: string;
-    providers: Record<string, LlmProviderConfig>;
+    /** Override the prompt template path (relative to project root). */
     promptFile?: string;
+    /** Override the provider's model name. */
+    model?: string;
+    /** Override the provider's base URL. */
+    baseUrl?: string;
+    /** Override max tokens. */
+    maxTokens?: number;
+    /** Override sampling temperature. */
+    temperature?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -358,10 +372,11 @@ export interface TaskConfig {
 
     // ── LLM settings ────────────────────────────────────────
     /**
-     * Inline LLM config — replaces the legacy config/llm-config.json.
+     * LLM selector — specifies the provider and optional per-field overrides.
+     * Full provider definitions live in config/llm_providers.json.
      * Only consulted when mode is "llm".
      */
-    llm?: LlmConfig;
+    llm?: TaskLlmConfig;
 }
 
 // ---------------------------------------------------------------------------
@@ -380,8 +395,8 @@ export interface Phase2PipelineOptions {
     basePath?: string;
     outputDir?: string | null;
     mode?: 'programmatic' | 'llm';
-    /** Optional inline LLM config from a task file. */
-    llmConfig?: LlmConfig;
+    /** Optional LLM selector from a task file. */
+    llmConfig?: TaskLlmConfig;
 }
 
 export interface Phase2PipelineResult {
@@ -389,29 +404,6 @@ export interface Phase2PipelineResult {
     structure: StructureAnalysis;
     theme: GeneratedTheme;
     score: ScoreReport | null;
-}
-
-// ---------------------------------------------------------------------------
-// Demo manifest types
-// ---------------------------------------------------------------------------
-
-export interface DemoEntry {
-    jobName: string;
-    jobFile: string;
-    outputDir: string;
-    safeName: string;
-    matchScore: number;
-    atsParsing: string;
-    missingKeywords: string[];
-    matchedKeywords: string[];
-}
-
-export interface Phase2DemoEntry {
-    sampleName: string;
-    sampleFile: string;
-    nameCandidate: string | null;
-    sectionOrder: string[];
-    layoutHints: LayoutHints;
 }
 
 export type SectionKey =

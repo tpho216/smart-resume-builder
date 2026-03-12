@@ -590,13 +590,11 @@ async function generateReplicaDocx(analysis: DocxAnalysis, outPath: string): Pro
  * Analyse a DOCX template with the LLM.
  * If a cached analysis JSON already exists it is loaded directly (no LLM call).
  * @param docxPath     Absolute path to the .docx template file.
- * @param taskConfigPath  Path to task JSON that holds llm.providers config (defaults to inputs/tasks/task_1.json).
- * @param providerName LLM provider key (defaults to 'github-copilot').
+ * @param providerName LLM provider key (defaults to 'github-copilot'). Must match an entry in config/llm_providers.json.
  * @returns Parsed DocxAnalysis object.
  */
 export async function analyzeDocxTemplate(
     docxPath: string,
-    taskConfigPath?: string,
     providerName = 'github-copilot',
 ): Promise<DocxAnalysis> {
     const baseName = path.basename(docxPath, '.docx');
@@ -609,13 +607,16 @@ export async function analyzeDocxTemplate(
         return JSON.parse(fs.readFileSync(analysisPath, 'utf-8')) as DocxAnalysis;
     }
 
-    // Load provider config
-    const resolvedTaskPath = taskConfigPath
-        ?? path.resolve(process.cwd(), 'inputs/tasks/task_1.json');
-    const task = JSON.parse(fs.readFileSync(resolvedTaskPath, 'utf-8'));
-    const providerCfg: ProviderCfg = task.llm?.providers?.[providerName];
+    // Load provider config from config/llm_providers.json (shared global registry)
+    const providersPath = path.resolve(process.cwd(), 'config/llm_providers.json');
+    if (!fs.existsSync(providersPath)) {
+        throw new Error(`LLM providers config not found: ${providersPath}`);
+    }
+    const providersFile = JSON.parse(fs.readFileSync(providersPath, 'utf-8'));
+    const providerCfg: ProviderCfg = providersFile.providers?.[providerName];
     if (!providerCfg) {
-        throw new Error(`Provider "${providerName}" not found in ${resolvedTaskPath}`);
+        const available = Object.keys(providersFile.providers ?? {}).join(', ');
+        throw new Error(`Provider "${providerName}" not found in ${providersPath}. Available: ${available}`);
     }
 
     fs.mkdirSync(cacheDir, { recursive: true });
@@ -652,16 +653,13 @@ async function main(): Promise<void> {
         ?? (argv[argv.indexOf('--provider') + 1])
         ?? 'github-copilot';
 
-    // Load provider config from task_1.json
-    const taskPath = path.resolve(process.cwd(), 'inputs/tasks/task_1.json');
-
     // Output paths
     const baseName = path.basename(docxPath, '.docx');
     const outDir = path.resolve(process.cwd(), 'outputs/llm_docx_analysis');
     const replicaPath = path.join(outDir, `${baseName}.replica.docx`);
 
     // Analyse (uses cached JSON if already exists)
-    const analysis = await analyzeDocxTemplate(docxPath, taskPath, providerName);
+    const analysis = await analyzeDocxTemplate(docxPath, providerName);
     console.log('\nAnalysis ready.');
 
     // Print summary

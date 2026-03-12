@@ -2,19 +2,9 @@
 /**
  * renderFromAnalysis.ts
  *
- * Bridge between llmAnalyzeDocx.ts and generateReplicaDocx.ts.
- *
  * Reads a DocxAnalysis JSON (produced by llmAnalyzeDocx.ts) and renders
- * a full placeholder DOCX using the correct table approach (FIXED layout,
- * columnWidths) so column widths are honoured in LibreOffice / Word.
- *
- * Usage:
- *   tsx src/renderFromAnalysis.ts [path/to/analysis.json] [output.docx]
- *   npm run render:analysis
- *
- * Defaults:
- *   input  → outputs/llm_docx_analysis/resume_template_2.analysis.json
- *   output → outputs/rendered_from_analysis/resume_template_2.docx
+ * a DOCX file — either a placeholder preview (CLI) or a real resume
+ * mapped from a JsonResume object (pipeline integration).
  */
 
 import fs from 'fs';
@@ -29,7 +19,7 @@ import type { DocxAnalysis, FieldDef, SectionDef } from './llmAnalyzeDocx.js';
 import type { JsonResume } from './types.js';
 
 // ---------------------------------------------------------------------------
-// Rendering constants (same as generateReplicaDocx.ts)
+// Rendering constants
 // ---------------------------------------------------------------------------
 const FONT = 'Calibri';
 const MARGIN = convertInchesToTwip(0.5);
@@ -100,7 +90,7 @@ function fallback(key: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Low-level builders (identical fixed-table pattern to generateReplicaDocx.ts)
+// Low-level builders (fixed-table pattern)
 // ---------------------------------------------------------------------------
 
 /** Remove any HTML tags the LLM may have accidentally injected (e.g. <p>…</p>). */
