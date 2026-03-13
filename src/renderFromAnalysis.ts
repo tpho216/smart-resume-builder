@@ -15,15 +15,50 @@ import {
     WidthType, BorderStyle, TableLayoutType,
     convertInchesToTwip,
 } from 'docx';
-import type { DocxAnalysis, FieldDef, SectionDef } from './llmAnalyzeDocx.js';
+import type { DocxAnalysis, FieldDef, SectionDef, CellBorders, CellBorder } from './llmAnalyzeDocx.js';
 import type { JsonResume } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Rendering constants
 // ---------------------------------------------------------------------------
-const DEFAULT_FONT = 'Calibri';
+const FALLBACK_FONT = 'Calibri';  // Only used if analysis has no font data
 const DEFAULT_MARGIN = convertInchesToTwip(0.5);
 const DEFAULT_PAGE_W = convertInchesToTwip(7.5);   // 8.5" − 2×0.5" margins
+
+/**
+ * Extract the most commonly used font from the analysis.
+ * Checks header fields and section headings to determine the template's primary font.
+ */
+function extractDefaultFont(analysis: DocxAnalysis): string {
+    const fontCounts: Record<string, number> = {};
+
+    // Count fonts in header
+    [...analysis.header.left, ...analysis.header.right].forEach(f => {
+        if (f.fontFamily) fontCounts[f.fontFamily] = (fontCounts[f.fontFamily] || 0) + 1;
+    });
+
+    // Count fonts in section headings and content
+    analysis.sections.forEach(s => {
+        if (s.headingFontFamily) fontCounts[s.headingFontFamily] = (fontCounts[s.headingFontFamily] || 0) + 2;
+        if (s.contentFontFamily) fontCounts[s.contentFontFamily] = (fontCounts[s.contentFontFamily] || 0) + 1;
+    });
+
+    // Find most common font
+    const entries = Object.entries(fontCounts);
+    if (entries.length === 0) return FALLBACK_FONT;
+
+    const [font] = entries.reduce((a, b) => a[1] > b[1] ? a : b);
+    return font;
+}
+
+/**
+ * Convert alignment value from analysis format to docx library format.
+ * Maps 'justify' to 'both' since the docx library uses 'both' for justified text.
+ */
+function normalizeAlignment(alignment?: 'left' | 'center' | 'right' | 'justify' | 'both' | 'distribute'): 'left' | 'center' | 'right' | 'both' | 'distribute' | undefined {
+    if (alignment === 'justify') return 'both';
+    return alignment as 'left' | 'center' | 'right' | 'both' | 'distribute' | undefined;
+}
 
 const BORDER_SOLID = {
     top: { style: BorderStyle.SINGLE, size: 6, color: '000000' },
@@ -142,15 +177,16 @@ interface ParagraphOptions {
     bold?: boolean;
     sizePt?: number;
     indentTwip?: number;
-    font?: string;
-    color?: string;
-    alignment?: 'left' | 'center' | 'right' | 'justify';
+    font?: string | null;  // null means use default from analysis
+    color?: string | null;  // null means use default black
+    alignment?: 'left' | 'center' | 'right' | 'justify' | 'both' | 'distribute';  // Accept both analysis and docx formats
     spacingBefore?: number;
     spacingAfter?: number;
     lineSpacing?: number;
+    defaultFont?: string;  // Template's default font from analysis
 }
 
-function p(text: string, bold = false, sizePt = 11, indentTwip = 0): Paragraph;
+function p(text: string, bold?: boolean, sizePt?: number, indentTwip?: number): Paragraph;
 function p(opts: ParagraphOptions): Paragraph;
 function p(
     textOrOpts: string | ParagraphOptions,
@@ -174,16 +210,21 @@ function p(
         spacing.lineRule = 'auto';
     }
 
+    // Use font from options, or default from analysis, or fallback
+    const font = opts.font === null ? (opts.defaultFont || FALLBACK_FONT) : (opts.font || opts.defaultFont || FALLBACK_FONT);
+    // Use color from options; null means default black
+    const color = opts.color === null ? undefined : opts.color;
+
     return new Paragraph({
         indent: opts.indentTwip ? { left: opts.indentTwip } : undefined,
-        alignment: opts.alignment,
+        alignment: normalizeAlignment(opts.alignment),
         spacing,
         children: [new TextRun({
             text: stripHtml(opts.text),
-            font: opts.font || DEFAULT_FONT,
+            font,
             size: (opts.sizePt || 11) * 2,
             bold: opts.bold || false,
-            color: opts.color,
+            color,
         })],
     });
 }
@@ -191,15 +232,16 @@ function p(
 interface SectionHeadingOptions {
     text: string;
     fontSize?: number;
-    font?: string;
-    color?: string;
+    font?: string | null;  // null means use default from analysis
+    color?: string | null;  // null means use default
     bold?: boolean;
-    alignment?: 'left' | 'center' | 'right' | 'justify';
+    alignment?: 'left' | 'center' | 'right' | 'justify' | 'both' | 'distribute';  // Accept both analysis and docx formats
     spacingBefore?: number;
     spacingAfter?: number;
+    defaultFont?: string;  // Template's default font from analysis
 }
 
-function sectionHeading(text: string, fontSize = 14): Paragraph;
+function sectionHeading(text: string, fontSize?: number): Paragraph;
 function sectionHeading(opts: SectionHeadingOptions): Paragraph;
 function sectionHeading(
     textOrOpts: string | SectionHeadingOptions,
@@ -212,17 +254,20 @@ function sectionHeading(
         opts = textOrOpts;
     }
 
-    const color = opts.color || '2563EB';
+    const color = opts.color === null ? '2563EB' : (opts.color || '2563EB');
     const spaceBefore = opts.spacingBefore !== undefined ? Math.round(opts.spacingBefore * 20) : 160;
     const spaceAfter = opts.spacingAfter !== undefined ? Math.round(opts.spacingAfter * 20) : 80;
 
+    // Use font from options, or default from analysis, or fallback
+    const font = opts.font === null ? (opts.defaultFont || FALLBACK_FONT) : (opts.font || opts.defaultFont || FALLBACK_FONT);
+
     return new Paragraph({
-        alignment: opts.alignment,
+        alignment: normalizeAlignment(opts.alignment),
         spacing: { before: spaceBefore, after: spaceAfter },
         border: { bottom: { style: BorderStyle.SINGLE, size: 6, color } },
         children: [new TextRun({
             text: opts.text,
-            font: opts.font || DEFAULT_FONT,
+            font,
             size: (opts.fontSize || 14) * 2,
             bold: opts.bold !== undefined ? opts.bold : true,
             color,
@@ -230,8 +275,8 @@ function sectionHeading(
     });
 }
 
-function empty(): Paragraph {
-    return new Paragraph({ children: [new TextRun({ text: '', font: DEFAULT_FONT, size: 22 })] });
+function empty(defaultFont?: string): Paragraph {
+    return new Paragraph({ children: [new TextRun({ text: '', font: defaultFont || FALLBACK_FONT, size: 20 })] });
 }
 
 interface TableStyleOptions {
@@ -240,6 +285,33 @@ interface TableStyleOptions {
     borderWidthPt?: number;
     cellPaddingPt?: number;
     shading?: string;
+    /** Per-column explicit cell borders from analysis; takes priority over table-level `borders` */
+    perCellBorders?: Array<CellBorders | undefined>;
+}
+
+/** Convert a single CellBorder side from the analysis to a docx border entry */
+function cellBorderSideToDocx(side: CellBorder | undefined): { style: any; size: number; color?: string } {
+    if (!side || side.val === 'nil' || side.val === 'none') {
+        return { style: BorderStyle.NONE, size: 0 };
+    }
+    if (side.color === 'ffffff') {
+        return { style: BorderStyle.NONE, size: 0 };
+    }
+    return {
+        style: BorderStyle.SINGLE,
+        size: side.widthPt ? Math.round(side.widthPt * 8) : 6,
+        color: side.color || '000000',
+    };
+}
+
+/** Convert a full CellBorders (T/R/B/L) from the analysis to a docx borders map */
+function cellBordersToDocx(cb: CellBorders): { top: any; bottom: any; left: any; right: any } {
+    return {
+        top: cellBorderSideToDocx(cb.top),
+        bottom: cellBorderSideToDocx(cb.bottom),
+        left: cellBorderSideToDocx(cb.left),
+        right: cellBorderSideToDocx(cb.right),
+    };
 }
 
 function fixedTable(
@@ -250,7 +322,7 @@ function fixedTable(
     const totalW = colWidths.reduce((a, b) => a + b, 0);
     const borders = styleOpts?.borders
         ? createBorders(styleOpts.borders, styleOpts.borderColor, styleOpts.borderWidthPt)
-        : BORDER_SOLID;
+        : BORDER_NONE;  // Default to no borders to match clean resume templates
     const cellPadding = styleOpts?.cellPaddingPt
         ? Math.round(styleOpts.cellPaddingPt * 20)
         : undefined;
@@ -261,8 +333,10 @@ function fixedTable(
         layout: TableLayoutType.FIXED,
         rows: [new TableRow({
             children: colWidths.map((w, i) => {
+                const perCell = styleOpts?.perCellBorders?.[i];
+                const cellBorders = perCell ? cellBordersToDocx(perCell) : borders;
                 const cellOpts: any = {
-                    borders,
+                    borders: cellBorders,
                     width: { size: w, type: WidthType.DXA },
                     children: rowsData[i] ?? [p('')],
                 };
@@ -291,7 +365,7 @@ function multiRowFixedTable(
     const totalW = colWidths.reduce((a, b) => a + b, 0);
     const borders = styleOpts?.borders
         ? createBorders(styleOpts.borders, styleOpts.borderColor, styleOpts.borderWidthPt)
-        : BORDER_SOLID;
+        : BORDER_NONE;  // Default to no borders to match clean resume templates
     const cellPadding = styleOpts?.cellPaddingPt
         ? Math.round(styleOpts.cellPaddingPt * 20)
         : undefined;
@@ -303,8 +377,10 @@ function multiRowFixedTable(
         rows: rowsData.map(rowCells =>
             new TableRow({
                 children: colWidths.map((w, i) => {
+                    const perCell = styleOpts?.perCellBorders?.[i];
+                    const cellBorders = perCell ? cellBordersToDocx(perCell) : borders;
                     const cellOpts: any = {
-                        borders,
+                        borders: cellBorders,
                         width: { size: w, type: WidthType.DXA },
                         children: rowCells[i] ?? [p('')],
                     };
@@ -329,7 +405,7 @@ function multiRowFixedTable(
 // ---------------------------------------------------------------------------
 // Build header table from DocxAnalysis.header
 // ---------------------------------------------------------------------------
-function buildHeader(header: DocxAnalysis['header'], pageWidth: number = DEFAULT_PAGE_W): Table {
+function buildHeader(header: DocxAnalysis['header'], pageWidth: number = DEFAULT_PAGE_W, defaultFont?: string): Table {
     // Calculate column widths
     let lw: number, rw: number;
     if (header.table?.columnWidthsPct && header.table.columnWidthsPct.length >= 2) {
@@ -346,9 +422,10 @@ function buildHeader(header: DocxAnalysis['header'], pageWidth: number = DEFAULT
         return p({
             text,
             bold: f.bold,
-            sizePt: f.fontSize ?? 11,
+            sizePt: f.fontSize ?? 10,
             font: f.fontFamily,
             color: f.color,
+            defaultFont,
         });
     }
 
@@ -373,9 +450,9 @@ function buildHeader(header: DocxAnalysis['header'], pageWidth: number = DEFAULT
 // ---------------------------------------------------------------------------
 // Build body blocks from a SectionDef
 // ---------------------------------------------------------------------------
-function buildSection(sec: SectionDef, pageWidth: number = DEFAULT_PAGE_W): Array<Paragraph | Table> {
+function buildSection(sec: SectionDef, pageWidth: number = DEFAULT_PAGE_W, defaultFont?: string): Array<Paragraph | Table> {
     const result: Array<Paragraph | Table> = [];
-    result.push(empty());
+    result.push(empty(defaultFont));
     result.push(sectionHeading({
         text: sec.heading,
         fontSize: sec.headingFontSize,
@@ -385,11 +462,12 @@ function buildSection(sec: SectionDef, pageWidth: number = DEFAULT_PAGE_W): Arra
         alignment: sec.headingAlignment,
         spacingBefore: sec.headingSpacingBeforePt,
         spacingAfter: sec.headingSpacingAfterPt,
+        defaultFont,
     }));
 
     const indTwip = sec.indentPt ? Math.round(sec.indentPt * 20) : 0;
     const bold = sec.contentBold ?? false;
-    const fontSize = sec.contentFontSize ?? 11;
+    const fontSize = sec.contentFontSize ?? 10;
     const font = sec.contentFontFamily;
     const color = sec.contentColor;
     const alignment = sec.contentAlignment;
@@ -408,6 +486,7 @@ function buildSection(sec: SectionDef, pageWidth: number = DEFAULT_PAGE_W): Arra
         indentTwip: overrideIndent !== undefined ? overrideIndent : indTwip,
         spacingBefore,
         lineSpacing,
+        defaultFont,
     });
 
     switch (sec.contentLayout) {
@@ -431,14 +510,19 @@ function buildSection(sec: SectionDef, pageWidth: number = DEFAULT_PAGE_W): Arra
 
         // ── two-column table ────────────────────────────────────────────
         case 'two-column-table': {
-            const cols = sec.table?.columns ?? [{ widthPct: 50 }, { widthPct: 50 }];
+            const cols: import('./llmAnalyzeDocx.js').TableColDef[] =
+                (sec.table?.columns ?? [{ widthPct: 50 }, { widthPct: 50 }]) as import('./llmAnalyzeDocx.js').TableColDef[];
             const total = cols.reduce((s, c) => s + (c.widthPct ?? 50), 0) || 100;
             const colWidths = cols.map(c => Math.round(pageWidth * ((c.widthPct ?? 50) / total)));
             // Fix rounding drift
             const diff = pageWidth - colWidths.reduce((a, b) => a + b, 0);
             colWidths[colWidths.length - 1] += diff;
 
-            const tableStyle = sec.table?.style;
+            // Merge table-level style with per-column cellBorders from analysis
+            const tableStyle: TableStyleOptions = {
+                ...sec.table?.style,
+                perCellBorders: cols.map(c => c.cellBorders),
+            };
 
             // Skills: array of [label, skills] tuples
             if (sec.key === 'skills') {
@@ -541,9 +625,9 @@ function bulletItems(key: string, resume: JsonResume): string[] {
 }
 
 /** Build DOCX section children from a SectionDef using real resume data. */
-function buildSectionFromResume(sec: SectionDef, resume: JsonResume, pageWidth: number = DEFAULT_PAGE_W): Array<Paragraph | Table> {
+function buildSectionFromResume(sec: SectionDef, resume: JsonResume, pageWidth: number = DEFAULT_PAGE_W, defaultFont?: string): Array<Paragraph | Table> {
     const result: Array<Paragraph | Table> = [];
-    result.push(empty());
+    result.push(empty(defaultFont));
     result.push(sectionHeading({
         text: sec.heading,
         fontSize: sec.headingFontSize,
@@ -553,11 +637,12 @@ function buildSectionFromResume(sec: SectionDef, resume: JsonResume, pageWidth: 
         alignment: sec.headingAlignment,
         spacingBefore: sec.headingSpacingBeforePt,
         spacingAfter: sec.headingSpacingAfterPt,
+        defaultFont,
     }));
 
     const indTwip = sec.indentPt ? Math.round(sec.indentPt * 20) : 0;
     const bold = sec.contentBold ?? false;
-    const fontSize = sec.contentFontSize ?? 11;
+    const fontSize = sec.contentFontSize ?? 10;
     const font = sec.contentFontFamily;
     const color = sec.contentColor;
     const alignment = sec.contentAlignment;
@@ -576,6 +661,7 @@ function buildSectionFromResume(sec: SectionDef, resume: JsonResume, pageWidth: 
         indentTwip: overrideIndent !== undefined ? overrideIndent : indTwip,
         spacingBefore,
         lineSpacing,
+        defaultFont,
     });
 
     switch (sec.contentLayout) {
@@ -591,12 +677,17 @@ function buildSectionFromResume(sec: SectionDef, resume: JsonResume, pageWidth: 
             break;
         }
         case 'two-column-table': {
-            const cols = sec.table?.columns ?? [{ widthPct: 50 }, { widthPct: 50 }];
+            const cols: import('./llmAnalyzeDocx.js').TableColDef[] =
+                (sec.table?.columns ?? [{ widthPct: 50 }, { widthPct: 50 }]) as import('./llmAnalyzeDocx.js').TableColDef[];
             const total = cols.reduce((s, c) => s + (c.widthPct ?? 50), 0) || 100;
             const colW = cols.map(c => Math.round(pageWidth * ((c.widthPct ?? 50) / total)));
             colW[colW.length - 1] += pageWidth - colW.reduce((a, b) => a + b, 0); // fix rounding
 
-            const tableStyle = sec.table?.style;
+            // Merge table-level style with per-column cellBorders from analysis
+            const tableStyle: TableStyleOptions = {
+                ...sec.table?.style,
+                perCellBorders: cols.map(c => c.cellBorders),
+            };
 
             if (key === 'skills' || key === 'core skills') {
                 const skillRows = (resume.skills ?? []).map(s =>
@@ -646,6 +737,9 @@ export async function renderDocxFromAnalysis(
     resume: JsonResume,
     outPath: string,
 ): Promise<void> {
+    // Extract default font from analysis
+    const defaultFont = extractDefaultFont(analysis);
+
     // Calculate page width from analysis
     const pageWidthIn = analysis.pageLayout?.widthIn ?? 8.5;
     const marginLeft = analysis.pageLayout?.marginsIn?.left ?? 0.5;
@@ -659,9 +753,10 @@ export async function renderDocxFromAnalysis(
         return p({
             text,
             bold: f.bold,
-            sizePt: f.fontSize ?? 11,
+            sizePt: f.fontSize ?? 10,
             font: f.fontFamily,
             color: f.color,
+            defaultFont,
         });
     }
 
@@ -697,7 +792,7 @@ export async function renderDocxFromAnalysis(
         : [headerEl];
 
     for (const sec of analysis.sections) {
-        children.push(...buildSectionFromResume(sec, resume, pageWidth));
+        children.push(...buildSectionFromResume(sec, resume, pageWidth, defaultFont));
     }
 
     const doc = new Document({
@@ -743,6 +838,9 @@ async function main(): Promise<void> {
 
     const analysis: DocxAnalysis = JSON.parse(fs.readFileSync(inPath, 'utf8'));
 
+    // Extract default font from analysis
+    const defaultFont = extractDefaultFont(analysis);
+
     // Calculate page width from analysis
     const pageWidthIn = analysis.pageLayout?.widthIn ?? 8.5;
     const marginLeft = analysis.pageLayout?.marginsIn?.left ?? 0.5;
@@ -751,8 +849,8 @@ async function main(): Promise<void> {
     const pageWidth = convertInchesToTwip(contentWidth);
 
     const children: Array<Paragraph | Table> = [
-        buildHeader(analysis.header, pageWidth),
-        ...analysis.sections.flatMap(sec => buildSection(sec, pageWidth)),
+        buildHeader(analysis.header, pageWidth, defaultFont),
+        ...analysis.sections.flatMap(sec => buildSection(sec, pageWidth, defaultFont)),
     ];
 
     const doc = new Document({

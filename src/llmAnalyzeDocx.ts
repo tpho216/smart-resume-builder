@@ -36,9 +36,23 @@ export interface FieldDef {
     sample: string;         // text snippet from original
 }
 
+export interface CellBorder {
+    val: 'single' | 'nil' | 'none' | string;  // 'nil'/'none' = invisible; 'single' = visible
+    color?: string;    // hex color without # (e.g. '000000')
+    widthPt?: number;  // border thickness in pt
+}
+
+export interface CellBorders {
+    top?: CellBorder;
+    bottom?: CellBorder;
+    left?: CellBorder;
+    right?: CellBorder;
+}
+
 export interface TableColDef {
     role: string;           // e.g. "skill-level-label" | "skill-list" | "cert-year-group"
     widthPct?: number;
+    cellBorders?: CellBorders;  // explicit per-side borders on cells in this column (first row)
 }
 
 export interface TableStyle {
@@ -106,6 +120,39 @@ export interface DocxAnalysis {
 // ---------------------------------------------------------------------------
 // DOCX XML extraction (pizzip)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Helper: decode a single DOCX border-side node into a structured entry
+// ---------------------------------------------------------------------------
+interface ParsedBorderEntry { val: string; color: string; szPt: number; }
+
+function parseBorderEntry(border: any): ParsedBorderEntry | null {
+    if (!border) return null;
+    return {
+        val: border?.['@_w:val'] ?? 'nil',
+        color: (border?.['@_w:color'] ?? '000000').toLowerCase(),
+        szPt: Math.round(parseInt(border?.['@_w:sz'] ?? '0', 10) / 8),
+    };
+}
+
+function borderEntryToStr(b: ParsedBorderEntry | null, name: string): string {
+    if (!b) return '';
+    if (b.val === 'nil' || b.val === 'none') return `${name}=nil`;
+    if (b.color === 'ffffff') return `${name}=white(hidden)`;
+    return `${name}=single color=${b.color} sz=${b.szPt}pt`;
+}
+
+/** Render the four sides of a w:tcBorders node as a compact string, e.g.:
+ *  "borders:[top=nil, bottom=nil, left=nil, right=single color=000000 sz=1pt]" */
+function tcBordersToStr(tcBorders: any): string {
+    const parts = [
+        borderEntryToStr(parseBorderEntry(tcBorders?.['w:top']), 'top'),
+        borderEntryToStr(parseBorderEntry(tcBorders?.['w:bottom']), 'bottom'),
+        borderEntryToStr(parseBorderEntry(tcBorders?.['w:left']), 'left'),
+        borderEntryToStr(parseBorderEntry(tcBorders?.['w:right']), 'right'),
+    ].filter(Boolean);
+    return parts.length > 0 ? `borders:[${parts.join(', ')}]` : '';
+}
 
 function extractXmlText(docxPath: string): { paragraphSummary: string; tablesSummary: string; styleNames: string[]; pageLayoutInfo: string } {
     let PizZip: new (data: Buffer) => any;
@@ -302,7 +349,50 @@ function extractXmlText(docxPath: string): { paragraphSummary: string; tablesSum
         const paddingInfo = cellPaddingPt > 0 ? ` cellPadding=${cellPaddingPt}pt` : '';
         const spacingInfo = cellSpacingPt > 0 ? ` cellSpacing=${cellSpacingPt}pt` : '';
 
-        tableLines.push(`\nTable ${tIdx}: ${rows.length} rows × ${numCols} cols  width=${width}"${borderInfo}${paddingInfo}${spacingInfo}  col-widths=[${colWidths.join(', ')}]`);
+        // ── Effective border analysis: scan first row for tcBorders overrides ──
+        // DOCX commonly uses tcBorders to nullify outer edges while retaining insideV,
+        // creating a "vertical divider only" appearance even when tblBorders says "all".
+        const firstRowCells = Array.isArray(rows[0]?.['w:tc']) ? rows[0]['w:tc'] : [];
+        let effectiveBorderStyle = borderStyle;
+        if (firstRowCells.length > 0) {
+            let innerVerticalColor: string | undefined;
+            let innerVerticalSz: number | undefined;
+            let outerOverriddenToNilOrWhite = true;
+            for (let ci = 0; ci < firstRowCells.length; ci++) {
+                const tcBorderNode = firstRowCells[ci]?.['w:tcPr']?.['w:tcBorders'];
+                if (!tcBorderNode) { outerOverriddenToNilOrWhite = false; continue; }
+                const top = parseBorderEntry(tcBorderNode?.['w:top']);
+                const bottom = parseBorderEntry(tcBorderNode?.['w:bottom']);
+                const left = parseBorderEntry(tcBorderNode?.['w:left']);
+                const right = parseBorderEntry(tcBorderNode?.['w:right']);
+                // Detect inner divider: non-last cell whose right is a visible, non-white border
+                if (ci < firstRowCells.length - 1 && right && right.val !== 'nil' && right.color !== 'ffffff') {
+                    innerVerticalColor = right.color;
+                    innerVerticalSz = right.szPt;
+                }
+                // Track whether all outer edges are suppressed
+                const isFirst = ci === 0;
+                const isLast = ci === firstRowCells.length - 1;
+                if (isFirst && left && left.val !== 'nil' && left.color !== 'ffffff') outerOverriddenToNilOrWhite = false;
+                if (isLast && right && right.val !== 'nil' && right.color !== 'ffffff') outerOverriddenToNilOrWhite = false;
+                if (top && top.val !== 'nil' && top.color !== 'ffffff') outerOverriddenToNilOrWhite = false;
+                if (bottom && bottom.val !== 'nil' && bottom.color !== 'ffffff') outerOverriddenToNilOrWhite = false;
+            }
+            if (innerVerticalColor && outerOverriddenToNilOrWhite) {
+                effectiveBorderStyle = 'vertical';
+                if (!borderColor) borderColor = innerVerticalColor;
+                if (!borderWidth) borderWidth = innerVerticalSz;
+            }
+            if (effectiveBorderStyle !== borderStyle) {
+                tableLines.push(`  [NOTE: tblBorders says "${borderStyle}" but cell tcBorders override outer edges to nil/white → effective visual border = "${effectiveBorderStyle}"${innerVerticalColor ? ` color=${innerVerticalColor}` : ''}${innerVerticalSz ? ` sz=${innerVerticalSz}pt` : ''}]`);
+            }
+        }
+
+        const effectiveBorderInfo = effectiveBorderStyle !== 'none'
+            ? ` borders=${effectiveBorderStyle}${borderColor ? ` color=${borderColor}` : ''}${borderWidth ? ` width=${borderWidth}pt` : ''}`
+            : ' borders=none';
+
+        tableLines.push(`\nTable ${tIdx}: ${rows.length} rows × ${numCols} cols  width=${width}"${effectiveBorderInfo}${paddingInfo}${spacingInfo}  col-widths=[${colWidths.join(', ')}]`);
 
         rows.forEach((tr: any, ri: number) => {
             const cells = Array.isArray(tr?.['w:tc']) ? tr['w:tc'] : [];
@@ -313,7 +403,12 @@ function extractXmlText(docxPath: string): { paragraphSummary: string; tablesSum
                 const shd = tc?.['w:tcPr']?.['w:shd'];
                 const shadingColor = shd?.['@_w:fill'];
                 const shadingInfo = shadingColor && shadingColor !== 'auto' ? ` shading=${shadingColor}` : '';
-                tableLines.push(`    Cell[${ci + 1}] width=${cellW}"${shadingInfo}:`); for (const p of (Array.isArray(tc?.['w:p']) ? tc['w:p'] : [])) {
+                // Per-cell border extraction (all four sides)
+                const tcBorderNode = tc?.['w:tcPr']?.['w:tcBorders'];
+                const borderStr = tcBorderNode ? tcBordersToStr(tcBorderNode) : '';
+                const borderInfo = borderStr ? ` ${borderStr}` : '';
+                tableLines.push(`    Cell[${ci + 1}] width=${cellW}"${shadingInfo}${borderInfo}:`);
+                for (const p of (Array.isArray(tc?.['w:p']) ? tc['w:p'] : [])) {
                     const line = summarisePara(p, '  ');
                     if (line) tableLines.push('  ' + line);
                 }
@@ -487,7 +582,16 @@ Return a single JSON object with this exact shape:
         "rows": <number>,
         "cols": <number>,
         "columns": [
-          { "role": "<description of this column's role>", "widthPct": <approximate % of table width> }
+          {
+            "role": "<description of this column's role>",
+            "widthPct": <approximate % of table width>,
+            "cellBorders": {
+              "top":    { "val": "single|nil|none", "color": "<hex|null>", "widthPt": <number|null> },
+              "bottom": { "val": "single|nil|none", "color": "<hex|null>", "widthPt": <number|null> },
+              "left":   { "val": "single|nil|none", "color": "<hex|null>", "widthPt": <number|null> },
+              "right":  { "val": "single|nil|none", "color": "<hex|null>", "widthPt": <number|null> }
+            }
+          }
         ],
         "style": {
           "borders": "all|horizontal|vertical|none",
@@ -508,7 +612,9 @@ IMPORTANT rules:
 - "header" refers to the name/contact block at the very top of the resume. It may be inside Table 1.
 - Map every field in the header table to its semantic role. Common roles: name, title, technologies (tech stack tagline), location, residency (visa/citizenship status), email, phone, linkedin, github, portfolio.
 - Extract ALL styling details from the dump: font sizes (sz=), fonts (font=), colors (color=), indentation (ind=), spacing (spaceBefore=, spaceAfter=), alignment (align=), line spacing (lineSpacing=).
-- For tables, extract border style (borders=), border color (color=), border width (width=), cell padding (cellPadding=), cell spacing (cellSpacing=), and shading colors (shading=).
+- For tables: use the effective border style on the "Table N:" header line (the dump pre-resolves cell overrides). Also read the per-cell "borders:[...]" annotation on each Cell line — these are the raw w:tcBorders (top/bottom/left/right). If a [NOTE: ...] line appears, its "effective visual border" value overrides the tblBorders classification.
+- For column cellBorders: read the "borders:[top=..., bottom=..., left=..., right=...]" annotation from the first Cell of each column. Map each side directly: val="nil" or "white(hidden)" → omit or set val="nil"; val="single color=XXX sz=Npt" → set val="single", color="XXX", widthPt=N. Omit cellBorders entirely for a column if none of its cells have tcBorder annotations.
+- Common DOCX pattern: tblBorders sets "all" but cells use tcBorders to hide outer sides (nil/white) and keep only the inner divider → effective = "vertical". The [NOTE: ...] line in the dump calls this out explicitly.
 - Only include sections that appear AFTER the header.
 - For tables used as layout containers (skills grid, certs split by year), set contentLayout="two-column-table" and fill in the "table" field.
 - Page layout: Use standard values if not explicitly shown in dump (Letter: 8.5×11", A4: 8.27×11.69"). Standard margins are typically 1" (top/bottom/left/right).
