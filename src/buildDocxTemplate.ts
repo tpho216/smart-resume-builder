@@ -26,6 +26,7 @@ import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
 import https from 'https';
+import readline from 'readline';
 import type { DocxMapping, DocxDataSpec } from '../src/types.js';
 
 // CJS interop
@@ -473,7 +474,7 @@ async function getLLMMapping(
     const url = `${cfg.baseUrl}/chat/completions`;
     const body = {
         model: cfg.model,
-        max_tokens: cfg.maxTokens ?? 4096,
+        max_tokens: cfg.maxTokens ?? 16384,
         temperature: 0,
         response_format: { type: 'json_object' },
         messages: [
@@ -489,6 +490,14 @@ async function getLLMMapping(
     };
     const usage = resp.usage;
     if (usage) console.log(`  Tokens: ${usage.prompt_tokens} prompt + ${usage.completion_tokens} completion = ${usage.total_tokens} total`);
+
+    const finishReason = resp.choices[0].finish_reason;
+    if (finishReason === 'length') {
+        throw new Error(
+            `LLM mapping response was truncated (finish_reason=length). ` +
+            `Increase maxTokens in config/llm_providers.json (currently ${cfg.maxTokens ?? 16384}).`
+        );
+    }
 
     const raw = resp.choices[0].message.content.trim();
     const parsed = JSON.parse(raw) as DocxMapping;
@@ -686,6 +695,8 @@ function injectFromMapping(docxPath: string, mapping: DocxMapping): Buffer {
 
         for (let ci = 0; ci < Math.min(cells.length, tcf.columnPlaceholders.length); ci++) {
             const placeholder = tcf.columnPlaceholders[ci];
+            // Normalize: strip any existing { } so we never produce double-braces
+            const rawField = placeholder.replace(/^\{+/, '').replace(/\}+$/, '');
             const cellXml = cells[ci];
             const cellPara = getAllParas(cellXml)[0];
             const pPr = cellPara ? pPrOf(cellPara.xml) : '';
@@ -693,7 +704,7 @@ function injectFromMapping(docxPath: string, mapping: DocxMapping): Buffer {
             const cellPrMatch = cellXml.match(/<w:tcPr[\s\S]*?<\/w:tcPr>/);
             const cellPr = cellPrMatch ? cellPrMatch[0] : '';
             const cellOpen = cellXml.match(/^<w:tc(?:\s[^>]*)?>/)?.[0] ?? '<w:tc>';
-            const newCell = `${cellOpen}${cellPr}${makePara(pPr, rPr, `{${placeholder}}`)}</w:tc>`;
+            const newCell = `${cellOpen}${cellPr}${makePara(pPr, rPr, `{${rawField}}`)}</w:tc>`;
             newRowXml = newRowXml.replace(cellXml, newCell);
         }
 
@@ -780,7 +791,15 @@ function injectFromMapping(docxPath: string, mapping: DocxMapping): Buffer {
                 } else if (!addedSummary && loop.summaryField && !addedHighlightsLoop) {
                     parts.push(replacePara(p.xml, `{${loop.summaryField}}`));
                     addedSummary = true;
+                } else if (!addedSummary && !addedHighlightsLoop) {
+                    // No matching prefix and no summaryField — use first unmatched body para as description
+                    const guessedField = loop.loopVar === 'projects' ? 'description' : 'summary';
+                    parts.push(replacePara(p.xml, `{${guessedField}}`));
+                    addedSummary = true;
+                    console.warn(`  [warn] sectionLoop "${loop.loopVar}": no bodyPattern matched "${p.text.slice(0, 40)}", falling back to {${guessedField}}`);
                 }
+                // If addedSummary=true and nothing matched, silently drop the paragraph
+                // (avoids repeating the same description field multiple times)
             }
         }
 
@@ -849,27 +868,89 @@ function patchMapping(mapping: DocxMapping, skeleton: DocxSkeleton): DocxMapping
         }
     }
 
-    // ── 2. Fix skills.keywords to be a joined string ──────────────────────
-    if (patched.data['skills'] && (patched.data['skills'] as Record<string, unknown>)['type'] === 'array') {
-        const skillsSpec = patched.data['skills'] as { type: string; path: string; itemMap: Record<string, DocxDataSpec> };
-        if (skillsSpec.itemMap?.['keywords']) {
-            const kw = skillsSpec.itemMap['keywords'] as Record<string, unknown>;
-            if (kw['type'] === 'array') {
-                // Replace nested array with a plain path (renderer auto-joins array values)
-                skillsSpec.itemMap['keywords'] = { type: 'path', path: 'keywords' } as DocxDataSpec;
-                console.log('  [patch] Fixed skills.keywords: nested array → path (auto-join)');
-            } else if (kw['type'] === 'concat') {
-                // Replace single-path concat with plain path (renderer handles array join + stripHtml)
-                const paths = kw['paths'] as string[];
-                if (paths?.length === 1) {
-                    skillsSpec.itemMap['keywords'] = { type: 'path', path: paths[0] } as DocxDataSpec;
-                    console.log('  [patch] Fixed skills.keywords: concat(single path) → path (auto-join)');
-                }
+    // ── 2. Fix *.keywords to be a joined string in any tableRowLoop data entry ──
+    for (const trl of patched.tableRowLoops) {
+        const spec = patched.data[trl.loopVar];
+        if (!spec || (spec as Record<string, unknown>)['type'] !== 'array') continue;
+        const arrSpec = spec as { type: string; path: string; itemMap: Record<string, DocxDataSpec> };
+        const kw = arrSpec.itemMap?.['keywords'] as Record<string, unknown> | undefined;
+        if (!kw) continue;
+        if (kw['type'] === 'array') {
+            arrSpec.itemMap['keywords'] = { type: 'path', path: 'keywords' } as DocxDataSpec;
+            console.log(`  [patch] Fixed ${trl.loopVar}.keywords: nested array → path (auto-join)`);
+        } else if (kw['type'] === 'concat') {
+            const paths = kw['paths'] as string[];
+            if (paths?.length === 1) {
+                arrSpec.itemMap['keywords'] = { type: 'path', path: paths[0] } as DocxDataSpec;
+                console.log(`  [patch] Fixed ${trl.loopVar}.keywords: concat(single path) → path (auto-join)`);
             }
         }
     }
 
-    // ── 3. Fix work.highlights: must be {type: "filterRest"} for bullet items ──
+    // ── 3. Fix work/projects highlights: must be filterRest; add summaryField; ensure position ──
+    const SECTION_SUMMARY_FIELD: Record<string, string> = {
+        work: 'summary', projects: 'description', volunteer: 'summary',
+    };
+
+    for (const sectionLoop of patched.sectionLoops) {
+        const loopDataKey = sectionLoop.loopVar;
+        // Ensure the sectionLoop has a summaryField set (used as fallback when no bodyPattern matches)
+        if (!sectionLoop.summaryField && SECTION_SUMMARY_FIELD[loopDataKey]) {
+            (sectionLoop as Record<string, unknown>)['summaryField'] = SECTION_SUMMARY_FIELD[loopDataKey];
+            console.log(`  [patch] Set sectionLoop "${loopDataKey}" summaryField: ${SECTION_SUMMARY_FIELD[loopDataKey]}`);
+        }
+
+        const spec = patched.data[loopDataKey] as { type: string; path: string; itemMap: Record<string, DocxDataSpec> } | undefined;
+        if (!spec || spec.type !== 'array') continue;
+
+        // Ensure itemMap fields use paths that match the target JsonResume array schema
+        if (loopDataKey === 'projects') {
+            // projects items use 'description' not 'summary', and have no 'position'
+            if (spec.itemMap?.['summary']) {
+                spec.itemMap['description'] = spec.itemMap['summary'];
+                (spec.itemMap['description'] as Record<string, unknown>)['path'] = 'description';
+                delete spec.itemMap['summary'];
+                console.log(`  [patch] Fixed ${loopDataKey}.itemMap: renamed summary → description`);
+            }
+            if (spec.itemMap?.['description']) {
+                (spec.itemMap['description'] as Record<string, unknown>)['path'] = 'description';
+            }
+            if (spec.itemMap?.['position']) {
+                delete spec.itemMap['position'];
+                console.log(`  [patch] Fixed ${loopDataKey}.itemMap: removed position (not in projects schema)`);
+            }
+        }
+        if (loopDataKey === 'work') {
+            // work items use 'summary' not 'description', and have 'position'
+            if (spec.itemMap?.['description']) {
+                spec.itemMap['summary'] = spec.itemMap['description'];
+                (spec.itemMap['summary'] as Record<string, unknown>)['path'] = 'summary';
+                delete spec.itemMap['description'];
+                console.log(`  [patch] Fixed ${loopDataKey}.itemMap: renamed description → summary`);
+            }
+        }
+
+        // Fix highlights to filterRest
+        if (spec.itemMap?.['highlights']) {
+            const hl = spec.itemMap['highlights'] as Record<string, unknown>;
+            if (hl['type'] !== 'filterRest') {
+                spec.itemMap['highlights'] = {
+                    type: 'filterRest',
+                    exclude: ['Responsibilities:', 'Technology Stacks:', 'Key contributions:'],
+                    itemField: 'text',
+                } as DocxDataSpec;
+                console.log(`  [patch] Fixed ${loopDataKey}.highlights: replaced with filterRest`);
+            }
+        }
+
+        // Ensure work-like entries have a "position" field
+        if (loopDataKey === 'work' && !spec.itemMap?.['position']) {
+            spec.itemMap['position'] = { type: 'path', path: 'position' } as DocxDataSpec;
+            console.log('  [patch] Added missing work.position field');
+        }
+    }
+
+    // Also fix work if it exists in data but isn't a sectionLoop (backward-compat)
     if (patched.data['work'] && (patched.data['work'] as Record<string, unknown>)['type'] === 'array') {
         const workSpec = patched.data['work'] as { type: string; path: string; itemMap: Record<string, DocxDataSpec> };
         if (workSpec.itemMap?.['highlights']) {
@@ -883,22 +964,22 @@ function patchMapping(mapping: DocxMapping, skeleton: DocxSkeleton): DocxMapping
                 console.log('  [patch] Fixed work.highlights: replaced with filterRest');
             }
         }
-        // Ensure work has a "position" field
         if (!workSpec.itemMap?.['position']) {
             workSpec.itemMap['position'] = { type: 'path', path: 'position' } as DocxDataSpec;
             console.log('  [patch] Added missing work.position field');
         }
     }
-    // Sync sectionLoop highlights.itemField with filterRest itemField
-    const workLoop = patched.sectionLoops.find(l => l.loopVar === 'work');
-    const workDataSpec = patched.data['work'] as { type: string; itemMap: Record<string, DocxDataSpec> } | undefined;
-    if (workLoop?.highlights && workDataSpec?.itemMap?.['highlights']) {
-        const hlSpec = workDataSpec.itemMap['highlights'] as Record<string, unknown>;
+    // Sync all sectionLoop highlights.itemField with their data filterRest itemField
+    for (const loop of patched.sectionLoops) {
+        if (!loop.highlights) continue;
+        const dataSpec = patched.data[loop.loopVar] as { type: string; itemMap: Record<string, DocxDataSpec> } | undefined;
+        if (!dataSpec?.itemMap?.['highlights']) continue;
+        const hlSpec = dataSpec.itemMap['highlights'] as Record<string, unknown>;
         if (hlSpec['type'] === 'filterRest' && hlSpec['itemField']) {
             const newField = hlSpec['itemField'] as string;
-            if (workLoop.highlights.itemField !== newField) {
-                console.log(`  [patch] Synced work highlights itemField: "${workLoop.highlights.itemField}" → "${newField}"`);
-                workLoop.highlights.itemField = newField;
+            if (loop.highlights.itemField !== newField) {
+                console.log(`  [patch] Synced ${loop.loopVar} highlights itemField: "${loop.highlights.itemField}" → "${newField}"`);
+                loop.highlights.itemField = newField;
             }
         }
     }
@@ -929,7 +1010,8 @@ function patchMapping(mapping: DocxMapping, skeleton: DocxSkeleton): DocxMapping
         if (!sectionHeadings.includes(loop.startAnchor)) {
             // Try to find the right heading from loopVar
             const varToHeading: Record<string, string> = {
-                work: 'RELEVANT EXPERIENCE', education: 'EDUCATION',
+                work: 'RELEVANT EXPERIENCE', projects: 'RELEVANT EXPERIENCE',
+                education: 'EDUCATION',
                 certifications: 'CERTIFICATIONS', interests: 'HOBBIES',
             };
             const candidate = varToHeading[loop.loopVar];
@@ -1003,10 +1085,170 @@ async function verifyTemplate(
     }));
 }
 
+// ─── Human-in-the-loop mapping review ────────────────────────────────────────
+
+const JSON_RESUME_ARRAYS = [
+    'work', 'projects', 'volunteer', 'education', 'awards',
+    'publications', 'skills', 'languages', 'interests', 'references', 'certificates',
+];
+
+function rl(): readline.Interface {
+    return readline.createInterface({ input: process.stdin, output: process.stdout });
+}
+
+function ask(iface: readline.Interface, prompt: string): Promise<string> {
+    return new Promise(resolve => iface.question(prompt, answer => resolve(answer.trim())));
+}
+
+// When switching sectionLoop loopVar, remap itemMap entry _paths_ that belong
+// to the old schema (e.g. work.summary → projects.description).
+// Format: { 'oldLoopVar_to_newLoopVar': { 'old.path.value': 'new.path.value' | '__remove__' } }
+const PATH_REMAP: Record<string, Record<string, string>> = {
+    work_to_projects: { summary: 'description', position: '__remove__' },
+    projects_to_work: { description: 'summary' },
+};
+
+async function reviewMapping(mapping: DocxMapping): Promise<DocxMapping> {
+    const result: DocxMapping = JSON.parse(JSON.stringify(mapping)); // deep clone
+    const iface = rl();
+
+    const hr = '─'.repeat(62);
+    const arrays = JSON_RESUME_ARRAYS.join(' / ');
+
+    // ── sectionLoops ────────────────────────────────────────────────
+    if (result.sectionLoops.length) {
+        console.log(`\n${hr}`);
+        console.log('  SECTION ASSIGNMENTS  (LLM identified section → JSON array)');
+        console.log(`  Valid values: ${arrays}`);
+        console.log(hr);
+
+        for (let i = 0; i < result.sectionLoops.length; i++) {
+            const sl = result.sectionLoops[i];
+            const answer = await ask(
+                iface,
+                `  [${i + 1}]  "${sl.startAnchor}"  →  ${sl.loopVar}\n       Press Enter to accept, or type replacement: `,
+            );
+            if (answer) {
+                console.log(`       ✎  ${sl.loopVar}  →  ${answer}`);
+                result.sectionLoops[i] = { ...sl, loopVar: answer };
+                // keep data entry in sync
+                const dataEntry = (result.data as Record<string, unknown>)[sl.loopVar] as Record<string, unknown> | undefined;
+                if (dataEntry) {
+                    // 1. Move data key
+                    (result.data as Record<string, unknown>)[answer] = dataEntry;
+                    delete (result.data as Record<string, unknown>)[sl.loopVar];
+
+                    // 2. Always update path to the new target array (user's explicit intent)
+                    const oldPath = dataEntry['path'] as string | undefined;
+                    dataEntry['path'] = answer;
+                    console.log(`       ✎  data.${answer}.path: "${oldPath ?? '?'}" → "${answer}"`);
+
+                    // 3. Remap itemMap entry paths for known JsonResume schema differences
+                    const remapKey = `${sl.loopVar}_to_${answer}`;
+                    const remap = PATH_REMAP[remapKey];
+                    const itemMap = dataEntry['itemMap'] as Record<string, Record<string, unknown>> | undefined;
+                    if (remap && itemMap) {
+                        for (const [fieldKey, fieldEntry] of Object.entries(itemMap)) {
+                            const currentPath = fieldEntry['path'] as string | undefined;
+                            if (!currentPath) continue;
+                            const newPath = remap[currentPath];
+                            if (newPath === '__remove__') {
+                                delete itemMap[fieldKey];
+                                console.log(`       ✎  data.${answer}.itemMap.${fieldKey}: removed (not in target schema)`);
+                            } else if (newPath) {
+                                fieldEntry['path'] = newPath;
+                                console.log(`       ✎  data.${answer} itemMap path: "${currentPath}" → "${newPath}"`);
+                            }
+                        }
+                    }
+                }
+            } else {
+                console.log('       ✓  kept');
+            }
+        }
+    }
+
+    // ── tableRowLoops ───────────────────────────────────────────────
+    if (result.tableRowLoops.length) {
+        console.log(`\n${hr}`);
+        console.log('  TABLE ROW SECTIONS');
+        console.log(hr);
+
+        for (let i = 0; i < result.tableRowLoops.length; i++) {
+            const tl = result.tableRowLoops[i];
+            const cols = tl.columnFields.join(', ');
+            const answer = await ask(
+                iface,
+                `  [${i + 1}]  "${tl.sectionAnchor}"  →  ${tl.loopVar}  (columns: ${cols})\n       Press Enter to accept, or type replacement loopVar: `,
+            );
+            if (answer) {
+                console.log(`       ✎  ${tl.loopVar}  →  ${answer}`);
+                result.tableRowLoops[i] = { ...tl, loopVar: answer };
+                if ((result.data as Record<string, unknown>)[tl.loopVar]) {
+                    (result.data as Record<string, unknown>)[answer] =
+                        (result.data as Record<string, unknown>)[tl.loopVar];
+                    delete (result.data as Record<string, unknown>)[tl.loopVar];
+                }
+            } else {
+                console.log('       ✓  kept');
+            }
+        }
+    }
+
+    // ── simpleReplacements ──────────────────────────────────────────
+    if (result.simpleReplacements.length) {
+        console.log(`\n${hr}`);
+        console.log('  SIMPLE REPLACEMENTS');
+        console.log(hr);
+        result.simpleReplacements.forEach((sr, idx) => {
+            const anchor = sr.anchor.length > 40 ? sr.anchor.slice(0, 37) + '…' : sr.anchor;
+            console.log(`  ${String(idx + 1).padStart(2)}.  "${anchor}"`);
+            console.log(`       →  ${sr.template}`);
+        });
+
+        let editing = true;
+        while (editing) {
+            const answer = await ask(
+                iface,
+                `\n  Press Enter to accept all, or type a line number to edit: `,
+            );
+            if (!answer) {
+                editing = false;
+            } else {
+                const n = parseInt(answer, 10);
+                if (isNaN(n) || n < 1 || n > result.simpleReplacements.length) {
+                    console.log(`  Invalid number. Enter 1-${result.simpleReplacements.length} or press Enter.`);
+                } else {
+                    const sr = result.simpleReplacements[n - 1];
+                    console.log(`  Editing entry ${n}:`);
+                    console.log(`    anchor:   "${sr.anchor}"`);
+                    console.log(`    template: ${sr.template}`);
+                    const field = await ask(iface, `  Edit which field? [anchor / template]: `);
+                    if (field === 'anchor' || field === 'template') {
+                        const val = await ask(iface, `  New value: `);
+                        if (val) {
+                            (result.simpleReplacements[n - 1] as Record<string, string>)[field] = val;
+                            console.log(`  ✎  Updated ${field} → "${val}"`);
+                        }
+                    } else {
+                        console.log('  Skipped — unrecognised field.');
+                    }
+                }
+            }
+        }
+    }
+
+    iface.close();
+    console.log(`\n${hr}`);
+    console.log('  Review complete.');
+    console.log(hr);
+    return result;
+}
+
 // ─── Main entry ───────────────────────────────────────────────────────────────
 
-export async function buildDocxTemplate(docxPath: string, options: { forceAnalyze?: boolean; provider?: string } = {}): Promise<void> {
-    const { forceAnalyze = false, provider = 'github-copilot' } = options;
+export async function buildDocxTemplate(docxPath: string, options: { forceAnalyze?: boolean; provider?: string; skipReview?: boolean } = {}): Promise<void> {
+    const { forceAnalyze = false, provider = 'github-copilot', skipReview = false } = options;
 
     const absDocxPath = path.resolve(docxPath);
     const base = path.basename(absDocxPath, '.docx');
@@ -1035,15 +1277,43 @@ export async function buildDocxTemplate(docxPath: string, options: { forceAnalyz
         mapping = await getLLMMapping(skeleton, resume, provider);
         fs.writeFileSync(mappingPath, JSON.stringify(mapping, null, 2));
         console.log(`  Mapping saved → ${mappingPath}`);
+
+        // ── Apply auto-patches ────────────────────────────────────────
+        const patched = patchMapping(mapping, skeleton);
+        if (JSON.stringify(patched) !== JSON.stringify(mapping)) {
+            fs.writeFileSync(mappingPath, JSON.stringify(patched, null, 2));
+            console.log('  Patched mapping saved.');
+        }
+        mapping = patched;
+
+        // ── Human-in-the-loop review (fresh analysis only) ────────────
+        if (!skipReview) {
+            const reviewed = await reviewMapping(mapping);
+            if (JSON.stringify(reviewed) !== JSON.stringify(mapping)) {
+                // Re-patch after review: user may have renamed loopVars, so summaryField,
+                // highlights fixes, etc. need to re-run against the new names.
+                const repatched = patchMapping(reviewed, skeleton);
+                fs.writeFileSync(mappingPath, JSON.stringify(repatched, null, 2));
+                console.log('  Reviewed + re-patched mapping saved.');
+                mapping = repatched;
+            } else {
+                mapping = reviewed;
+            }
+        }
+
+        // Return early — patches + review already applied above
+        // (fall through to injection)
     }
 
-    // ── Apply auto-patches to fix common LLM mapping issues ──────────────
-    const patched = patchMapping(mapping, skeleton);
-    if (JSON.stringify(patched) !== JSON.stringify(mapping)) {
-        fs.writeFileSync(mappingPath, JSON.stringify(patched, null, 2));
-        console.log('  Patched mapping saved.');
+    // ── Apply auto-patches to fix common LLM mapping issues (cached path) ──
+    if (!forceAnalyze && fs.existsSync(mappingPath)) {
+        const patched = patchMapping(mapping, skeleton);
+        if (JSON.stringify(patched) !== JSON.stringify(mapping)) {
+            fs.writeFileSync(mappingPath, JSON.stringify(patched, null, 2));
+            console.log('  Patched mapping saved.');
+        }
+        mapping = patched;
     }
-    mapping = patched;
 
     // ── Phase 2: Injection ────────────────────────────────────────────────
     console.log('\nInjecting placeholders...');
@@ -1066,15 +1336,16 @@ async function main() {
     const docxPath = args.find(a => a.endsWith('.docx') && !a.startsWith('-'));
     const forceAnalyze = args.includes('--analyze');
     const doVerify = args.includes('--verify');
+    const skipReview = args.includes('--no-review');
     const providerFlagIdx = args.indexOf('--provider');
     const provider = providerFlagIdx >= 0 ? args[providerFlagIdx + 1] : 'github-copilot';
 
     if (!docxPath) {
-        console.error('Usage: tsx scripts/buildDocxTemplate.ts <template.docx> [--analyze] [--verify] [--provider <name>]');
+        console.error('Usage: tsx src/buildDocxTemplate.ts <template.docx> [--analyze] [--no-review] [--verify] [--provider <name>]');
         process.exit(1);
     }
 
-    await buildDocxTemplate(docxPath, { forceAnalyze, provider });
+    await buildDocxTemplate(docxPath, { forceAnalyze, provider, skipReview });
 
     const absDocxPath = path.resolve(docxPath);
     const base = path.basename(absDocxPath, '.docx');

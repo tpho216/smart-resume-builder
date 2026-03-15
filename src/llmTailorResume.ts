@@ -197,9 +197,17 @@ async function callOpenAI(providerCfg: LlmProviderConfig, prompt: string): Promi
     };
 
     const raw = resp.choices[0].message.content;
-    debugLog(`raw response (finish_reason=${resp.choices[0].finish_reason})`, raw);
+    const finishReason = resp.choices[0].finish_reason;
+    debugLog(`raw response (finish_reason=${finishReason})`, raw);
     if (resp.usage) {
         console.log(`  Tokens: ${resp.usage.prompt_tokens} prompt + ${resp.usage.completion_tokens} completion = ${resp.usage.total_tokens} total`);
+    }
+    if (finishReason === 'length') {
+        throw new Error(
+            `LLM response was truncated (finish_reason=length). ` +
+            `Output hit the maxTokens limit (${providerCfg.maxTokens}). ` +
+            `Increase maxTokens in config/llm_providers.json or simplify the base resume.`
+        );
     }
     return raw;
 }
@@ -233,6 +241,13 @@ async function callAnthropic(providerCfg: LlmProviderConfig, prompt: string): Pr
     debugLog(`raw response (stop_reason=${resp.stop_reason ?? 'n/a'})`, raw);
     if (resp.usage) {
         console.log(`  Tokens: ${resp.usage.input_tokens} input + ${resp.usage.output_tokens} output`);
+    }
+    if (resp.stop_reason === 'max_tokens') {
+        throw new Error(
+            `LLM response was truncated (stop_reason=max_tokens). ` +
+            `Output hit the maxTokens limit (${providerCfg.maxTokens}). ` +
+            `Increase maxTokens in config/llm_providers.json or simplify the base resume.`
+        );
     }
     return raw;
 }

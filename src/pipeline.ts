@@ -99,6 +99,10 @@ interface CliArgs {
     templateResume?: string;
     theme?: string;
     help: boolean;
+    /** Force re-analysis of the DOCX template (re-runs LLM + review). */
+    analyze?: boolean;
+    /** Skip the interactive review step when --analyze is also passed. */
+    noReview?: boolean;
 }
 
 function parseCliArgs(argv: string[]): CliArgs {
@@ -141,6 +145,12 @@ function parseCliArgs(argv: string[]): CliArgs {
             case '--theme':
                 cli.theme = argv[++i];
                 break;
+            case '--analyze':
+                cli.analyze = true;
+                break;
+            case '--no-review':
+                cli.noReview = true;
+                break;
             default:
                 // Positional: bare .json → task file; .txt → job ad
                 if (!arg.startsWith('--')) {
@@ -176,6 +186,10 @@ interface ResolvedConfig {
      * Renders via docxtemplater — faster and more accurate than the LLM-analysis path.
      */
     templateDocxTplPath?: string;
+    /** Force re-analysis of the DOCX template (re-runs LLM + interactive review). */
+    analyze?: boolean;
+    /** Skip the interactive review when --analyze is also set. */
+    noReview?: boolean;
 }
 
 function resolveConfig(cli: CliArgs, task?: TaskConfig): ResolvedConfig {
@@ -227,6 +241,8 @@ function resolveConfig(cli: CliArgs, task?: TaskConfig): ResolvedConfig {
         templateDocxTplPath: task?.templateDocxTpl
             ? path.resolve(task.templateDocxTpl)
             : undefined,
+        analyze: cli.analyze,
+        noReview: cli.noReview,
     };
 }
 
@@ -374,11 +390,16 @@ async function runPipeline(
         const { renderDocxFromTemplate } = await import('./renderDocxFromTemplate.js');
         const tplBase = path.basename(config.templateDocxTplPath, '_tpl.docx');
         const mappingPath = path.join(PROJECT_ROOT, 'outputs', 'llm_docx_analysis', `${tplBase}_mapping.json`);
-        if (!fs.existsSync(config.templateDocxTplPath) || !fs.existsSync(mappingPath)) {
+        const needsBuild = config.analyze || !fs.existsSync(config.templateDocxTplPath) || !fs.existsSync(mappingPath);
+        if (needsBuild) {
             const srcDocx = path.join(PROJECT_ROOT, 'inputs', 'resume_templates', `${tplBase}.docx`);
-            console.log(`\n  [auto] Building template (files missing, running build:tpl)...`);
+            const reason = config.analyze ? '--analyze flag' : 'files missing';
+            console.log(`\n  [auto] Building template (${reason})...`);
             const { spawnSync } = require('child_process') as typeof import('child_process');
-            const result = spawnSync('npx', ['tsx', 'src/buildDocxTemplate.ts', srcDocx], {
+            const buildArgs = ['tsx', 'src/buildDocxTemplate.ts', srcDocx];
+            if (config.analyze) buildArgs.push('--analyze');
+            if (config.noReview) buildArgs.push('--no-review');
+            const result = spawnSync('npx', buildArgs, {
                 cwd: PROJECT_ROOT,
                 stdio: 'inherit',
                 shell: true,
