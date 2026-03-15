@@ -56,8 +56,6 @@ import { programmaticallyTailorResume } from './tailorResume';
 import { llmTailorResume } from './llmTailorResume';
 import { renderToHtml, renderToHtmlWithNamedTheme, renderToPdf } from './renderResume';
 import { renderToDocx } from './renderDocx';
-import { analyzeDocxTemplate } from './llmAnalyzeDocx';
-import { renderDocxFromAnalysis } from './renderFromAnalysis';
 import { calculateScore } from './scoreResume';
 import { parseUploadedResume } from './parseUploadedResume';
 import { analyzeStructure } from './analyzeStructure';
@@ -173,8 +171,11 @@ interface ResolvedConfig {
     templateResumePath?: string;
     /** Named JSON Resume theme (e.g. "elegant", "even"). */
     theme?: string;
-    /** Path to a DOCX template for LLM-analysis-based DOCX output. */
-    templateDocxPath?: string;
+    /**
+     * Path to a pre-built *_tpl.docx + *_mapping.json produced by buildDocxTemplate.ts.
+     * Renders via docxtemplater — faster and more accurate than the LLM-analysis path.
+     */
+    templateDocxTplPath?: string;
 }
 
 function resolveConfig(cli: CliArgs, task?: TaskConfig): ResolvedConfig {
@@ -223,8 +224,8 @@ function resolveConfig(cli: CliArgs, task?: TaskConfig): ResolvedConfig {
                 ? path.resolve(task.templateResume)
                 : undefined,
         theme: cli.theme ?? task?.theme,
-        templateDocxPath: task?.templateDocx
-            ? path.resolve(task.templateDocx)
+        templateDocxTplPath: task?.templateDocxTpl
+            ? path.resolve(task.templateDocxTpl)
             : undefined,
     };
 }
@@ -366,17 +367,26 @@ async function runPipeline(
     fs.writeFileSync(docxPath, docxBuffer);
     console.log(`       DOCX → ${docxPath}`);
 
-    // ── Template DOCX (LLM-analysis-based) ──────────────────
-    if (config.templateDocxPath) {
-        console.log('\nRendering template DOCX...');
-        console.log(`       Template: ${config.templateDocxPath}`);
-        const analysis = await analyzeDocxTemplate(
-            config.templateDocxPath,
-            config.llmConfig?.provider,
-        );
-        const tplSuffix = path.basename(config.templateDocxPath, '.docx');
-        const tplDocxPath = path.join(outDir, `${compactName}_Resume_${tplSuffix}.docx`);
-        await renderDocxFromAnalysis(analysis, tailored, tplDocxPath);
+    // ── Template DOCX (docxtemplater — mapping-based) ────────
+    if (config.templateDocxTplPath) {
+        console.log('\nRendering template DOCX (docxtemplater)...');
+        console.log(`       Template: ${config.templateDocxTplPath}`);
+        const { renderDocxFromTemplate } = await import('./renderDocxFromTemplate.js');
+        const tplBase = path.basename(config.templateDocxTplPath, '_tpl.docx');
+        const mappingPath = path.join(PROJECT_ROOT, 'outputs', 'llm_docx_analysis', `${tplBase}_mapping.json`);
+        if (!fs.existsSync(config.templateDocxTplPath) || !fs.existsSync(mappingPath)) {
+            const srcDocx = path.join(PROJECT_ROOT, 'inputs', 'resume_templates', `${tplBase}.docx`);
+            console.log(`\n  [auto] Building template (files missing, running build:tpl)...`);
+            const { spawnSync } = require('child_process') as typeof import('child_process');
+            const result = spawnSync('npx', ['tsx', 'src/buildDocxTemplate.ts', srcDocx], {
+                cwd: PROJECT_ROOT,
+                stdio: 'inherit',
+                shell: true,
+            });
+            if (result.status !== 0) throw new Error('build:tpl failed — cannot render _dtpl.docx');
+        }
+        const tplDocxPath = path.join(outDir, `${compactName}_Resume_${tplBase}_dtpl.docx`);
+        await renderDocxFromTemplate(config.templateDocxTplPath, mappingPath, tailored, tplDocxPath);
         console.log(`       Template DOCX → ${tplDocxPath}`);
     }
 

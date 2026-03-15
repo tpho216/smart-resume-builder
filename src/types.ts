@@ -358,11 +358,11 @@ export interface TaskConfig {
      */
     theme?: string;
     /**
-     * Path to a DOCX template whose layout (analysed by llmAnalyzeDocx.ts)
-     * should be used to render the tailored resume as a DOCX file.
-     * When set, the pipeline also produces <name>.template.docx in outDir.
+     * Path to a pre-built *_tpl.docx (produced by scripts/buildDocxTemplate.ts).
+     * Uses docxtemplater for pixel-accurate rendering without an LLM call at render time.
+     * Requires a companion *_mapping.json in outputs/llm_docx_analysis/.
      */
-    templateDocx?: string;
+    templateDocxTpl?: string;
 
     // ── Pipeline behaviour ──────────────────────────────────
     /** "programmatic" (default) or "llm". */
@@ -405,6 +405,53 @@ export interface Phase2PipelineResult {
     theme: GeneratedTheme;
     score: ScoreReport | null;
 }
+
+// ---------------------------------------------------------------------------
+// DocxMapping — shared schema for buildDocxTemplate + renderDocxFromTemplate
+// ---------------------------------------------------------------------------
+
+export interface DocxMapping {
+    version: '1';
+    simpleReplacements: Array<{ anchor: string; template: string }>;
+    paragraphLoops: Array<{
+        loopVar: string; itemField: string; anchors: string[];
+    }>;
+    tableRowLoops: Array<{
+        loopVar: string; sectionAnchor: string; columnFields: string[];
+    }>;
+    tableCellFields: Array<{
+        sectionAnchor: string; columnPlaceholders: string[];
+    }>;
+    sectionLoops: Array<{
+        loopVar: string;
+        startAnchor: string;
+        endAnchor: string;
+        headingTemplate: string;
+        headingStyle?: 'heading2' | 'bold';
+        bodyPatterns: Array<{
+            prefix: string;
+            field?: string;
+            template?: string;
+            keepLiteral?: boolean;
+        }>;
+        summaryField?: string;
+        highlights?: { loopVar: string; itemField: string };
+    }>;
+    data: Record<string, DocxDataSpec>;
+}
+
+export type DocxDataSpec =
+    | { type: 'path'; path: string }
+    | { type: 'split'; path: string; by: string; index: number }
+    | { type: 'literal'; value: string }
+    | { type: 'concat'; paths: string[]; sep: string }
+    | { type: 'profile'; network: string; field: string }
+    | { type: 'splitSentences'; path: string; itemField: string }
+    | { type: 'formatDate'; path: string }
+    | { type: 'array'; path: string; itemMap: Record<string, DocxDataSpec> }
+    | { type: 'extractPrefix'; prefix: string }
+    | { type: 'filterRest'; exclude: string[]; itemField: string }
+    | { type: 'certs'; inProgress: boolean };
 
 export type SectionKey =
     | 'contact'

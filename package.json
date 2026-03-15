@@ -8,8 +8,7 @@
     "build:watch": "tsc --watch",
     "task": "tsx src/pipeline.ts --task",
     "task:1": "tsx src/pipeline.ts --task inputs/tasks/task_1.json",
-    "task:2": "tsx src/pipeline.ts --task inputs/tasks/task_2.json",
-    "render:template": "tsx scripts/reRenderTemplate.ts"
+    "task:2": "tsx src/pipeline.ts --task inputs/tasks/task_2.json"
   },
   "keywords": [
     "resume",
@@ -23,6 +22,7 @@
   "license": "MIT",
   "dependencies": {
     "docx": "^9.6.0",
+    "docxtemplater": "^3.68.3",
     "dotenv": "^17.3.1",
     "fast-xml-parser": "^5.5.2",
     "jsonresume-theme-elegant": "^1.16.1",

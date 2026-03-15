@@ -5,7 +5,7 @@
     "jobAd": "inputs/job_ads/revel_street.txt",
     "mode": "llm",
     "outputDir": "outputs",
-    "templateDocx": "inputs/resume_templates/resume_template_2.docx",
+    "templateDocxTpl": "outputs/templates/resume_template_2_tpl.docx",
     "llm": {
         "provider": "github-copilot"
     }
