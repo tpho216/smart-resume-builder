@@ -255,6 +255,8 @@ function extractXmlText(docxPath: string): { paragraphSummary: string; tablesSum
             for (const t of (Array.isArray(r?.['w:t']) ? r['w:t'] : [r?.['w:t']]).filter(Boolean)) {
                 text += typeof t === 'string' ? t : (t?.['#text'] ?? '');
             }
+            // Detect w:tab element — signals a field separator (e.g. linkedin [TAB] github on same line)
+            if (r?.['w:tab'] !== undefined) text += ' [TAB] ';
         }
         // Also pick up hyperlink runs
         for (const hl of (Array.isArray(p?.['w:hyperlink']) ? p['w:hyperlink'] : [p?.['w:hyperlink']]).filter(Boolean)) {
@@ -346,7 +348,7 @@ function extractXmlText(docxPath: string): { paragraphSummary: string; tablesSum
         const borderInfo = borderStyle !== 'none'
             ? ` borders=${borderStyle}${borderColor ? ` color=${borderColor}` : ''}${borderWidth ? ` width=${borderWidth}pt` : ''}`
             : ' borders=none';
-        const paddingInfo = cellPaddingPt > 0 ? ` cellPadding=${cellPaddingPt}pt` : '';
+        const paddingInfo = ` cellPadding=${cellPaddingPt}pt`; // always emit so LLM can capture it
         const spacingInfo = cellSpacingPt > 0 ? ` cellSpacing=${cellSpacingPt}pt` : '';
 
         // ── Effective border analysis: scan first row for tcBorders overrides ──
@@ -618,6 +620,7 @@ IMPORTANT rules:
 - Only include sections that appear AFTER the header.
 - For tables used as layout containers (skills grid, certs split by year), set contentLayout="two-column-table" and fill in the "table" field.
 - Page layout: Use standard values if not explicitly shown in dump (Letter: 8.5×11", A4: 8.27×11.69"). Standard margins are typically 1" (top/bottom/left/right).
+- If a sample value contains ' [TAB] ', the original paragraph had tab-separated items on one line. Split each part into its own separate field entry with the correct semanticRole — this is common in the header right column where linkedin/github links share a paragraph.
 - Colors are hex without # prefix (e.g. "000000" for black, "0070C0" for blue).
 - Use null for optional fields when not present in the dump.`;
 }
@@ -702,12 +705,40 @@ function makeEmpty(): Paragraph {
     return new Paragraph({ children: [new TextRun('')] });
 }
 
-function buildHeaderSection(header: DocxAnalysis['header']): Table | Paragraph[] {
+const DEFAULT_CELL_PAD_PT = 4;
+
+function buildHeaderSection(header: DocxAnalysis['header'], pageLayout: DocxAnalysis['pageLayout']): Table | Paragraph[] {
     if (header.layout === 'two-column-table') {
-        // Estimate column widths by typical proportion
-        const totalWidth = IN(7.5);
-        const leftWidth = IN(4.5);
+        // Use analysed table widthPct + columnWidthsPct; centre the table via indent
+        const usableWidthIn = (pageLayout?.widthIn ?? 8.5)
+            - (pageLayout?.marginsIn?.left ?? 0.5)
+            - (pageLayout?.marginsIn?.right ?? 0.5);
+        const usableWidth = IN(usableWidthIn);
+        const widthPct = header.table?.widthPct ?? 100;
+        const totalWidth = Math.round(usableWidth * widthPct / 100);
+        const tableIndent = Math.round((usableWidth - totalWidth) / 2);
+        const colPcts = header.table?.columnWidthsPct ?? [60, 40];
+        const leftWidth = Math.round(totalWidth * (colPcts[0] ?? 60) / 100);
         const rightWidth = totalWidth - leftWidth;
+
+        // Derive per-cell borders from table style (vertical = inner divider only)
+        const tableStyle = header.table?.style;
+        const bStyle = tableStyle?.borders ?? 'none';
+        const bColor = tableStyle?.borderColor ?? '000000';
+        const bSz = Math.round((tableStyle?.borderWidthPt ?? 1) * 8);
+        const vis = { style: BorderStyle.SINGLE, size: bSz, color: bColor };
+        const inv = { style: BorderStyle.NIL, size: 0, color: 'ffffff' };
+        const leftCellBorders = bStyle === 'vertical'
+            ? { top: inv, bottom: inv, left: inv, right: vis }
+            : bStyle === 'all'
+                ? { top: vis, bottom: vis, left: vis, right: vis }
+                : { top: inv, bottom: inv, left: inv, right: inv };
+        const rightCellBorders = bStyle === 'vertical'
+            ? { top: inv, bottom: inv, left: vis, right: inv }
+            : leftCellBorders;
+
+        const cellPadPt = tableStyle?.cellPaddingPt ?? DEFAULT_CELL_PAD_PT;
+        const cellMargin = { top: PT(cellPadPt), bottom: PT(cellPadPt), left: PT(cellPadPt), right: PT(cellPadPt) };
 
         const leftParas = header.left.map(f =>
             new Paragraph({
@@ -734,15 +765,13 @@ function buildHeaderSection(header: DocxAnalysis['header']): Table | Paragraph[]
             });
         });
 
-        const border = { style: BorderStyle.SINGLE, size: 6, color: '000000' };
-        const borders = { top: border, bottom: border, left: border, right: border };
-
         return new Table({
             width: { size: totalWidth, type: WidthType.DXA },
+            indent: { size: tableIndent, type: WidthType.DXA },
             rows: [new TableRow({
                 children: [
-                    new TableCell({ borders, width: { size: leftWidth, type: WidthType.DXA }, children: leftParas }),
-                    new TableCell({ borders, width: { size: rightWidth, type: WidthType.DXA }, children: rightParas }),
+                    new TableCell({ borders: leftCellBorders, margins: cellMargin, width: { size: leftWidth, type: WidthType.DXA }, children: leftParas }),
+                    new TableCell({ borders: rightCellBorders, margins: cellMargin, width: { size: rightWidth, type: WidthType.DXA }, children: rightParas }),
                 ]
             })],
         });
@@ -773,8 +802,15 @@ function buildSection(sec: SectionDef): Array<Table | Paragraph> {
         );
         // Ensure we always have the right count
         while (colWidths.length < cols) colWidths.push(Math.round(totalWidth / cols));
-        const border = { style: BorderStyle.SINGLE, size: 6, color: '000000' };
-        const borders = { top: border, bottom: border, left: border, right: border };
+        // Derive borders from section table style
+        const tStyle = sec.table.style;
+        const tBStyle = tStyle?.borders ?? 'none';
+        const tBColor = tStyle?.borderColor ?? '000000';
+        const tBSz = Math.round((tStyle?.borderWidthPt ?? 1) * 8);
+        const tVis = { style: BorderStyle.SINGLE, size: tBSz, color: tBColor };
+        const tInv = { style: BorderStyle.NIL, size: 0, color: 'ffffff' };
+        const tCellPadPt = tStyle?.cellPaddingPt ?? DEFAULT_CELL_PAD_PT;
+        const tCellMargin = { top: PT(tCellPadPt), bottom: PT(tCellPadPt), left: PT(tCellPadPt), right: PT(tCellPadPt) };
 
         // Split items into rows
         const itemsPerRow = Math.ceil(items.length / rows);
@@ -789,8 +825,26 @@ function buildSection(sec: SectionDef): Array<Table | Paragraph> {
                         : (rowItems[0]?.split(':')[0] ?? `Group ${r + 1}`))
                     : rowItems.map(i => i.split(':').slice(1).join(':').trim() || i).join('; ');
 
+                // Per-column border: vertical style = right border on non-last col, left on non-first col
+                const isFirst = ci === 0;
+                const isLast = ci === sec.table!.columns.length - 1;
+                const colBorders = sec.table!.columns[ci]?.cellBorders;
+                const colBorderStyle = colBorders
+                    ? {
+                        top: colBorders.top?.val === 'single' ? tVis : tInv,
+                        bottom: colBorders.bottom?.val === 'single' ? tVis : tInv,
+                        left: colBorders.left?.val === 'single' ? tVis : tInv,
+                        right: colBorders.right?.val === 'single' ? tVis : tInv,
+                    }
+                    : tBStyle === 'vertical'
+                        ? { top: tInv, bottom: tInv, left: isFirst ? tInv : tVis, right: isLast ? tInv : tVis }
+                        : tBStyle === 'all'
+                            ? { top: tVis, bottom: tVis, left: tVis, right: tVis }
+                            : { top: tInv, bottom: tInv, left: tInv, right: tInv };
+
                 return new TableCell({
-                    borders,
+                    borders: colBorderStyle,
+                    margins: tCellMargin,
                     width: { size: colWidths[ci] ?? Math.round(totalWidth / cols), type: WidthType.DXA },
                     children: [new Paragraph({
                         children: [new TextRun({ text: cellText, bold: ci === 0 })],
@@ -819,7 +873,7 @@ async function generateReplicaDocx(analysis: DocxAnalysis, outPath: string): Pro
     const bodyChildren: Array<Table | Paragraph> = [];
 
     // Header
-    const headerEl = buildHeaderSection(analysis.header);
+    const headerEl = buildHeaderSection(analysis.header, analysis.pageLayout);
     if (Array.isArray(headerEl)) bodyChildren.push(...headerEl);
     else bodyChildren.push(headerEl);
 
