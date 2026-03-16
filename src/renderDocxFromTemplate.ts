@@ -88,7 +88,8 @@ function evalSpec(spec: DataSpec, resume: JsonResume): unknown {
             return formatDate((getPath(resume, s['path'] as string) as string) ?? undefined);
         }
         case 'array': {
-            const arr = (getPath(resume, s['path'] as string) as unknown[]) ?? [];
+            const raw = (getPath(resume, s['path'] as string) as unknown) ?? [];
+            const arr = Array.isArray(raw) ? raw : [];
             const itemMap = s['itemMap'] as Record<string, DataSpec>;
             return arr.map(item => {
                 const obj: AnyRecord = {};

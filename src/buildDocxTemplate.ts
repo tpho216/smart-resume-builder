@@ -65,7 +65,11 @@ function pPrOf(paraXml: string): string {
 
 function firstRPrOf(paraXml: string): string {
     const m = paraXml.match(/<w:rPr[\s\S]*?<\/w:rPr>/);
-    return m ? m[0] : '';
+    if (!m) return '';
+    // Strip highlight and shading elements — they come from template markup, not content
+    return m[0]
+        .replace(/<w:highlight[^/]*(\/?>|<\/w:highlight>)/g, '')
+        .replace(/<w:shd[^/]*(\/?>|<\/w:shd>)/g, '');
 }
 
 function paraOpenTag(paraXml: string): string {
@@ -764,6 +768,7 @@ function injectFromMapping(docxPath: string, mapping: DocxMapping): Buffer {
 
         let addedHighlightsLoop = false;
         let addedSummary = false;
+        const usedPatterns = new Set<number>(); // track which bodyPattern indices have been emitted
 
         for (const p of firstJobParas) {
             if (isItemHead(p)) {
@@ -779,14 +784,19 @@ function injectFromMapping(docxPath: string, mapping: DocxMapping): Buffer {
                 }
             } else {
                 const text = p.text;
-                const matchedPattern = loop.bodyPatterns.find(bp => text.startsWith(bp.prefix));
-                if (matchedPattern) {
+                const matchIdx = loop.bodyPatterns.findIndex(
+                    (bp, idx) => !usedPatterns.has(idx) && text.startsWith(bp.prefix)
+                );
+                if (matchIdx >= 0) {
+                    const matchedPattern = loop.bodyPatterns[matchIdx];
+                    usedPatterns.add(matchIdx);
                     if (matchedPattern.keepLiteral) {
                         parts.push(p.xml); // keep original text
                     } else if (matchedPattern.template) {
                         parts.push(replacePara(p.xml, matchedPattern.template));
                     } else if (matchedPattern.field) {
                         parts.push(replacePara(p.xml, `{${matchedPattern.field}}`));
+                        if (!addedSummary) addedSummary = true; // treat first field emit as summary
                     }
                 } else if (!addedSummary && loop.summaryField && !addedHighlightsLoop) {
                     parts.push(replacePara(p.xml, `{${loop.summaryField}}`));
@@ -798,8 +808,8 @@ function injectFromMapping(docxPath: string, mapping: DocxMapping): Buffer {
                     addedSummary = true;
                     console.warn(`  [warn] sectionLoop "${loop.loopVar}": no bodyPattern matched "${p.text.slice(0, 40)}", falling back to {${guessedField}}`);
                 }
-                // If addedSummary=true and nothing matched, silently drop the paragraph
-                // (avoids repeating the same description field multiple times)
+                // If addedSummary=true and no pattern matched, silently drop the paragraph
+                // (avoids repeating the same description/summary field multiple times)
             }
         }
 
@@ -840,6 +850,11 @@ function patchMapping(mapping: DocxMapping, skeleton: DocxSkeleton): DocxMapping
             patched.data['summaryLines'] = { type: 'splitSentences', path: 'basics.summary', itemField: 'line' };
             console.log('  [patch] Added missing paragraphLoop: summaryLines');
         }
+    }
+    // Always normalise: LLM sometimes generates type:"array" for summaryLines instead of splitSentences
+    if (patched.data['summaryLines'] && (patched.data['summaryLines'] as Record<string, unknown>)['type'] !== 'splitSentences') {
+        patched.data['summaryLines'] = { type: 'splitSentences', path: 'basics.summary', itemField: 'line' };
+        console.log('  [patch] Normalised summaryLines data spec to splitSentences');
     }
 
     // Normalize: rename 'hobbies' paragraphLoop to 'interests' so it matches data key
@@ -918,6 +933,26 @@ function patchMapping(mapping: DocxMapping, skeleton: DocxSkeleton): DocxMapping
             if (spec.itemMap?.['position']) {
                 delete spec.itemMap['position'];
                 console.log(`  [patch] Fixed ${loopDataKey}.itemMap: removed position (not in projects schema)`);
+            }
+
+            // Fix headingTemplate: remove {position} placeholder
+            if (sectionLoop.headingTemplate?.includes('{position}')) {
+                sectionLoop.headingTemplate = sectionLoop.headingTemplate
+                    .replace(/\s*[–-]\s*\{position\}/, '')
+                    .replace(/\{position\}\s*[–-]?\s*/, '');
+                console.log(`  [patch] Fixed projects headingTemplate: removed {position}`);
+            }
+
+            // Fix summaryField and bodyPatterns: summary → description
+            if ((sectionLoop as Record<string, unknown>)['summaryField'] === 'summary') {
+                (sectionLoop as Record<string, unknown>)['summaryField'] = 'description';
+                console.log(`  [patch] Fixed projects sectionLoop summaryField: summary → description`);
+            }
+            for (const bp of sectionLoop.bodyPatterns ?? []) {
+                if ((bp as Record<string, unknown>)['field'] === 'summary') {
+                    (bp as Record<string, unknown>)['field'] = 'description';
+                    console.log(`  [patch] Fixed projects bodyPattern field: summary → description`);
+                }
             }
         }
         if (loopDataKey === 'work') {
