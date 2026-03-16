@@ -19,6 +19,7 @@ import fs from 'fs';
 import path from 'path';
 import https from 'https';
 import type { JsonResume, Seniority, TaskLlmConfig, LlmProviderConfig } from './types';
+import { parseTemplateFields, buildTemplateFieldHint } from './parseTemplateFields';
 
 // ---------------------------------------------------------------------------
 // Providers registry  (config/llm_providers.json)
@@ -107,13 +108,15 @@ interface PromptData {
     jobAdText: string;
     keywords: string[];
     seniority: Seniority;
+    templateFieldHint?: string;
 }
 
-export function buildPrompt(template: string, { baseResume, jobAdText, keywords, seniority }: PromptData): string {
+export function buildPrompt(template: string, { baseResume, jobAdText, keywords, seniority, templateFieldHint }: PromptData): string {
     return template
         .replace('{{SENIORITY}}', seniority)
         .replace('{{KEYWORDS}}', keywords.join(', '))
         .replace('{{JOB_AD}}', jobAdText)
+        .replace('{{TEMPLATE_FIELDS}}', templateFieldHint ?? '(no template detected — include all standard fields)')
         .replace('{{BASE_RESUME}}', JSON.stringify(baseResume, null, 2));
 }
 
@@ -267,6 +270,20 @@ function stripHtml(str: string): string {
 }
 
 /**
+ * Normalise a highlights entry that the LLM may return as either a plain string
+ * or an object like {text: "..."} (mirroring the docxtemplater loop item field).
+ */
+function normaliseHighlight(h: unknown): string {
+    if (typeof h === 'string') return stripHtml(h);
+    if (h && typeof h === 'object') {
+        const obj = h as Record<string, unknown>;
+        const val = obj['text'] ?? obj['name'] ?? obj['value'] ?? Object.values(obj)[0];
+        if (typeof val === 'string') return stripHtml(val);
+    }
+    return String(h ?? '');
+}
+
+/**
  * Walk the parsed resume and sanitize every free-text field that the LLM
  * might accidentally wrap in HTML tags (e.g. <p>…</p>).
  */
@@ -277,20 +294,20 @@ function sanitizeTextFields(resume: JsonResume): JsonResume {
     }
     resume.work?.forEach(w => {
         if (w.summary) w.summary = stripHtml(w.summary);
-        if (w.highlights) w.highlights = w.highlights.map(stripHtml);
+        if (w.highlights) w.highlights = w.highlights.map(normaliseHighlight);
     });
     resume.projects?.forEach(p => {
         if (p.description) p.description = stripHtml(p.description);
         if (p.summary) p.summary = stripHtml(p.summary);
-        if (p.highlights) p.highlights = p.highlights.map(stripHtml);
+        if (p.highlights) p.highlights = p.highlights.map(normaliseHighlight);
     });
     resume.skills?.forEach(s => {
         if (s.name) s.name = stripHtml(s.name);
-        if (s.keywords) s.keywords = s.keywords.map(stripHtml);
+        if (s.keywords) s.keywords = s.keywords.map(k => (typeof k === 'string' ? stripHtml(k) : String(k)));
     });
     resume.volunteer?.forEach(v => {
         if (v.summary) v.summary = stripHtml(v.summary);
-        if (v.highlights) v.highlights = v.highlights.map(stripHtml);
+        if (v.highlights) v.highlights = v.highlights.map(normaliseHighlight);
     });
     resume.awards?.forEach(a => {
         if (a.summary) a.summary = stripHtml(a.summary);
@@ -327,6 +344,100 @@ function parseJsonResponse(raw: string): JsonResume {
 }
 
 // ---------------------------------------------------------------------------
+// Project pre-selection (reduces token usage for providers with small limits)
+// ---------------------------------------------------------------------------
+
+/**
+ * Use a lightweight LLM call to pick the N most relevant projects for this
+ * job ad, so the full tailoring prompt stays within token limits.
+ */
+async function selectRelevantProjects(
+    projects: JsonResume['projects'],
+    keywords: string[],
+    jobAdText: string,
+    providerCfg: LlmProviderConfig,
+    providerName: string,
+    count = 3,
+): Promise<JsonResume['projects']> {
+    if (!projects || projects.length <= count) return projects;
+
+    const summaries = projects.map((p, i) => ({
+        index: i,
+        name: p.name,
+        dates: (p as { dates?: number[] }).dates ?? [p.startDate, p.endDate].filter(Boolean),
+        category: (p as { category?: string }).category ?? '',
+        technologies: (p as { technologies?: string }).technologies ?? p.keywords?.join(', ') ?? '',
+        skills: (p as { skills?: string }).skills ?? '',
+    }));
+
+    const selectionPrompt =
+        `You are helping select the most relevant projects for a job application.
+
+Job keywords: ${keywords.join(', ')}
+Job description (excerpt): ${jobAdText.slice(0, 600)}
+
+Projects available:
+${JSON.stringify(summaries, null, 2)}
+
+Return ONLY a valid JSON array of exactly ${count} index numbers (e.g. [2, 5, 8]) representing the most recent and relevant projects. No explanation, no markdown.`;
+
+    console.log(`  Selecting top ${count} projects via LLM...`);
+    let raw: string;
+    // Use a minimal-cost call — same provider, no response_format restriction needed
+    const selectionCfg: LlmProviderConfig = { ...providerCfg, maxTokens: 128, temperature: 0 };
+    if (providerName === 'openai' || providerName === 'github-copilot') {
+        const apiKey = process.env[selectionCfg.apiKeyEnv];
+        if (!apiKey) throw new Error(`Missing env var: ${selectionCfg.apiKeyEnv}`);
+        const url = `${selectionCfg.baseUrl}/chat/completions`;
+        const body = {
+            model: selectionCfg.model,
+            max_tokens: selectionCfg.maxTokens,
+            temperature: selectionCfg.temperature,
+            messages: [
+                { role: 'user', content: selectionPrompt },
+            ],
+        };
+        const resp = await httpsPost(url, { Authorization: `Bearer ${apiKey}` }, body) as {
+            choices: { message: { content: string } }[];
+        };
+        raw = resp.choices[0].message.content.trim();
+    } else if (providerName === 'anthropic') {
+        const apiKey = process.env[selectionCfg.apiKeyEnv];
+        if (!apiKey) throw new Error(`Missing env var: ${selectionCfg.apiKeyEnv}`);
+        const url = `${selectionCfg.baseUrl}/messages`;
+        const body = {
+            model: selectionCfg.model,
+            max_tokens: selectionCfg.maxTokens,
+            temperature: selectionCfg.temperature,
+            messages: [{ role: 'user', content: selectionPrompt }],
+        };
+        const resp = await httpsPost(url, {
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+        }, body) as { content: { text: string }[] };
+        raw = resp.content[0].text.trim();
+    } else {
+        throw new Error(`Unsupported provider: ${providerName}`);
+    }
+
+    // Parse the returned index array
+    const cleaned = raw.replace(/```[\s\S]*?```/g, '').trim();
+    const match = cleaned.match(/\[[\s\S]*?\]/);
+    if (!match) {
+        console.warn(`  [project-select] Unexpected response — using first ${count} projects. Raw: ${raw.slice(0, 120)}`);
+        return projects.slice(0, count);
+    }
+    const indexes: number[] = JSON.parse(match[0]);
+    const selected = indexes
+        .filter(i => i >= 0 && i < projects.length)
+        .slice(0, count)
+        .map(i => projects![i]);
+
+    console.log(`  Selected projects: ${selected.map(p => p.name).join(', ')}`);
+    return selected;
+}
+
+// ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
 
@@ -342,11 +453,38 @@ export async function llmTailorResume(
     keywords: string[],
     seniority: Seniority,
     inlineConfig?: TaskLlmConfig,
+    templateDocxPath?: string,
 ): Promise<JsonResume> {
     const taskLlm = inlineConfig ?? loadConfig();
     const { providerCfg, promptFile, providerName } = resolveProviderConfig(taskLlm);
+
+    // Auto-detect template fields from the .docx template (if provided) and inject
+    // into the LLM prompt so it always populates exactly the right fields.
+    let templateFieldHint: string | undefined;
+    if (templateDocxPath && fs.existsSync(templateDocxPath)) {
+        const parsed = parseTemplateFields(templateDocxPath);
+        templateFieldHint = buildTemplateFieldHint(parsed);
+        if (templateFieldHint) {
+            console.log(`  Template fields detected from: ${path.basename(templateDocxPath)}`);
+            for (const sec of parsed.sections) {
+                console.log(`    [${sec.loopVar}]: ${sec.fields.join(', ')}`);
+            }
+        }
+    }
+
+    // Pre-select the most relevant projects to keep the main prompt under the
+    // provider's token limit (especially important for github-copilot / gpt-4.1).
+    const selectedProjects = await selectRelevantProjects(
+        baseResume.projects,
+        keywords,
+        jobAdText,
+        providerCfg,
+        providerName,
+    );
+    const trimmedResume: JsonResume = { ...baseResume, projects: selectedProjects };
+
     const template = loadPromptTemplateFromPath(promptFile);
-    const prompt = buildPrompt(template, { baseResume, jobAdText, keywords, seniority });
+    const prompt = buildPrompt(template, { baseResume: trimmedResume, jobAdText, keywords, seniority, templateFieldHint });
 
     let rawResponse: string;
     if (providerName === 'openai' || providerName === 'github-copilot') {
@@ -377,6 +515,14 @@ export async function llmTailorResume(
         const removed = before - tailored.work.length;
         if (removed > 0) {
             console.log(`       [post-process] Removed ${removed} fabricated work entr${removed === 1 ? 'y' : 'ies'} not in base resume.`);
+        }
+    }
+
+    // Guard: if the LLM dropped projects entirely, restore the pre-selected ones.
+    if (!tailored.projects || tailored.projects.length === 0) {
+        tailored.projects = selectedProjects ?? [];
+        if (tailored.projects.length > 0) {
+            console.log(`       [post-process] LLM omitted projects — restored ${tailored.projects.length} pre-selected project(s).`);
         }
     }
 

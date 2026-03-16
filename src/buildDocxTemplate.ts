@@ -948,11 +948,37 @@ function patchMapping(mapping: DocxMapping, skeleton: DocxSkeleton): DocxMapping
                 (sectionLoop as Record<string, unknown>)['summaryField'] = 'description';
                 console.log(`  [patch] Fixed projects sectionLoop summaryField: summary → description`);
             }
+            if (!sectionLoop.bodyPatterns) (sectionLoop as Record<string, unknown>)['bodyPatterns'] = [];
             for (const bp of sectionLoop.bodyPatterns ?? []) {
                 if ((bp as Record<string, unknown>)['field'] === 'summary') {
                     (bp as Record<string, unknown>)['field'] = 'description';
                     console.log(`  [patch] Fixed projects bodyPattern field: summary → description`);
                 }
+            }
+            // Remove any bodyPattern whose field matches summaryField — they duplicate the summary line
+            const sfld = ((sectionLoop as Record<string, unknown>)['summaryField'] as string) ?? 'description';
+            (sectionLoop as Record<string, unknown>)['bodyPatterns'] = (sectionLoop.bodyPatterns ?? []).filter(
+                bp => (bp as Record<string, unknown>)['field'] !== sfld
+            );
+
+            // Ensure responsibilities and technologies bodyPatterns exist
+            const bpFields = (sectionLoop.bodyPatterns ?? []).map(bp => (bp as Record<string, unknown>)['field']);
+            if (!bpFields.includes('responsibilities')) {
+                (sectionLoop.bodyPatterns as unknown[]).push({ prefix: 'Responsibilities:', field: 'responsibilities' });
+                console.log(`  [patch] Added missing projects bodyPattern: Responsibilities: {responsibilities}`);
+            }
+            if (!bpFields.includes('technologies')) {
+                (sectionLoop.bodyPatterns as unknown[]).push({ prefix: 'Technology Stacks:', field: 'technologies' });
+                console.log(`  [patch] Added missing projects bodyPattern: Technology Stacks: {technologies}`);
+            }
+            // Ensure itemMap has direct path entries for responsibilities and technologies
+            if (spec.itemMap && !spec.itemMap['responsibilities']) {
+                spec.itemMap['responsibilities'] = { type: 'path', path: 'responsibilities' } as DocxDataSpec;
+                console.log(`  [patch] Added missing projects.itemMap.responsibilities`);
+            }
+            if (spec.itemMap && !spec.itemMap['technologies']) {
+                spec.itemMap['technologies'] = { type: 'path', path: 'technologies' } as DocxDataSpec;
+                console.log(`  [patch] Added missing projects.itemMap.technologies`);
             }
         }
         if (loopDataKey === 'work') {
@@ -975,6 +1001,47 @@ function patchMapping(mapping: DocxMapping, skeleton: DocxSkeleton): DocxMapping
                     itemField: 'text',
                 } as DocxDataSpec;
                 console.log(`  [patch] Fixed ${loopDataKey}.highlights: replaced with filterRest`);
+            }
+        }
+
+        // ── Derive extractPrefix itemMap entries from bodyPattern prefixes ──────
+        // For every bodyPattern with both a prefix AND a field, enforce extractPrefix
+        // in the itemMap — so {responsibilities}/{technologies} reliably pull from
+        // highlights rather than whatever path the LLM guessed.
+        // Also keep filterRest.exclude in sync with those same prefix strings.
+        const prefixExcludes = new Set<string>();
+        for (const bp of sectionLoop.bodyPatterns ?? []) {
+            const field = (bp as Record<string, unknown>)['field'] as string | undefined;
+            const prefix = (bp as Record<string, unknown>)['prefix'] as string | undefined;
+            if (!field || !prefix) continue;
+            // Skip fields that are served by a direct path (description/summary)
+            const summaryField = (sectionLoop as Record<string, unknown>)['summaryField'] as string | undefined;
+            if (field === summaryField || field === 'description' || field === 'summary') continue;
+
+            prefixExcludes.add(prefix);
+            const current = spec.itemMap?.[field] as Record<string, unknown> | undefined;
+            // Any field tied to a prefix must use extractPrefix — it can never be a direct JSON Resume path.
+            // Fix if missing, or any type other than extractPrefix.
+            if (!current || current['type'] !== 'extractPrefix') {
+                if (spec.itemMap) {
+                    spec.itemMap[field] = { type: 'extractPrefix', prefix } as DocxDataSpec;
+                    console.log(`  [patch] Fixed ${loopDataKey}.itemMap.${field}: set extractPrefix("${prefix}")`);
+                }
+            }
+        }
+        // Sync filterRest.exclude to include all prefix lines so they don't bleed into {#highlights}
+        if (prefixExcludes.size && spec.itemMap?.['highlights']) {
+            const hl = spec.itemMap['highlights'] as Record<string, unknown>;
+            if (hl['type'] === 'filterRest') {
+                const existing = new Set<string>((hl['exclude'] as string[]) ?? []);
+                let changed = false;
+                for (const ex of prefixExcludes) {
+                    if (!existing.has(ex)) { existing.add(ex); changed = true; }
+                }
+                if (changed) {
+                    hl['exclude'] = [...existing];
+                    console.log(`  [patch] Synced ${loopDataKey}.highlights filterRest.exclude with bodyPattern prefixes`);
+                }
             }
         }
 
@@ -1143,7 +1210,7 @@ const PATH_REMAP: Record<string, Record<string, string>> = {
     projects_to_work: { description: 'summary' },
 };
 
-async function reviewMapping(mapping: DocxMapping): Promise<DocxMapping> {
+async function reviewMapping(mapping: DocxMapping, resume: Record<string, unknown>): Promise<DocxMapping> {
     const result: DocxMapping = JSON.parse(JSON.stringify(mapping)); // deep clone
     const iface = rl();
 
@@ -1199,6 +1266,105 @@ async function reviewMapping(mapping: DocxMapping): Promise<DocxMapping> {
                 }
             } else {
                 console.log('       ✓  kept');
+            }
+
+            // ── itemMap field mapping (runs for every sectionLoop) ───────
+            const currentLoopVar = result.sectionLoops[i].loopVar;
+            const sl2 = result.sectionLoops[i];
+            const dataEntryAfter = (result.data as Record<string, unknown>)[currentLoopVar] as Record<string, unknown> | undefined;
+            const itemMapAfter = dataEntryAfter?.['itemMap'] as Record<string, Record<string, unknown>> | undefined;
+            if (itemMapAfter) {
+                // Show every bodyPattern field for confirm/override (not just missing ones).
+                // The LLM often generates plausible-looking but wrong specs (e.g. type:path for a prefix field).
+                const AUTO_FIELDS = new Set(['highlights', 'text', 'line']);
+                const bodyFields = sl2.bodyPatterns
+                    .filter(bp => bp.field && !AUTO_FIELDS.has(bp.field))
+                    .map(bp => ({ field: bp.field as string, prefix: bp.prefix ?? '' }));
+
+                if (bodyFields.length) {
+                    // ── Print docxtemplater template preview ─────────────────
+                    const previewLines: string[] = [];
+                    previewLines.push(`{#${currentLoopVar}}`);
+                    previewLines.push(sl2.headingTemplate);
+                    if (sl2.summaryField) previewLines.push(`{${sl2.summaryField}}`);
+                    for (const bp of sl2.bodyPatterns) {
+                        const field = (bp as Record<string, unknown>)['field'] as string | undefined;
+                        const prefix = (bp as Record<string, unknown>)['prefix'] as string | undefined;
+                        if (!field) continue;
+                        if (field === 'highlights' || field === sl2.highlights?.itemField) continue;
+                        // Skip if already shown via summaryField to avoid duplication
+                        if (field === sl2.summaryField) continue;
+                        previewLines.push(prefix ? `${prefix} {${field}}` : `{${field}}`);
+                    }
+                    if (sl2.highlights) {
+                        previewLines.push(`{#${currentLoopVar}_highlights}{${sl2.highlights.itemField}}{/${currentLoopVar}_highlights}`);
+                    } else {
+                        previewLines.push(`{#highlights}{text}{/highlights}`);
+                    }
+                    previewLines.push(`{/${currentLoopVar}}`);
+
+                    console.log(`\n  TEMPLATE PREVIEW: "${sl2.startAnchor}"`);
+                    console.log(`  ${'─'.repeat(56)}`);
+                    for (const line of previewLines) console.log(`  ${line}`);
+                    console.log(`  ${'─'.repeat(56)}`);
+                    // ─────────────────────────────────────────────────────────
+
+                    // Collect actual fields from the first item in the target array
+                    const targetArray = resume[currentLoopVar] as Record<string, unknown>[] | undefined;
+                    const sampleItem = Array.isArray(targetArray) ? targetArray[0] : undefined;
+                    const itemFieldNames = sampleItem ? Object.keys(sampleItem).filter(k => k !== 'highlights') : [];
+
+                    console.log(`\n  ITEM FIELD MAPPING: "${sl2.startAnchor}" → ${currentLoopVar}`);
+                    console.log(`  Confirm how each body field maps to resume data.`);
+                    if (itemFieldNames.length) {
+                        console.log(`  Available fields from base-resume.json ${currentLoopVar}[0]:`);
+                        console.log(`    ${itemFieldNames.map(f => `"${f}"`).join('  ')}`);
+                    }
+                    console.log(`  Options:  <fieldName>  |  prefix:<text>  |  Enter = keep/auto-fix`);
+                    for (const { field: fieldKey, prefix } of bodyFields) {
+                        const current = itemMapAfter[fieldKey];
+                        // Describe current mapping concisely
+                        let currentDesc: string;
+                        if (!current) {
+                            currentDesc = '(missing)';
+                        } else if (current['type'] === 'extractPrefix') {
+                            currentDesc = `extractPrefix("${current['prefix']}")`;
+                        } else if (current['type'] === 'path') {
+                            currentDesc = `path("${current['path']}")`;
+                        } else if (current['type'] === 'literal' && !current['value']) {
+                            currentDesc = '(empty)';
+                        } else {
+                            currentDesc = `${current['type']}`;
+                        }
+                        // Suggest extractPrefix if bodyPattern has a prefix
+                        const suggestion = prefix ? ` → suggest: prefix:${prefix}` : '';
+                        const raw = await ask(
+                            iface,
+                            `  [?]  "${prefix} {${fieldKey}}"  currently=${currentDesc}${suggestion}\n       Press Enter to keep, or type replacement: `,
+                        );
+                        if (!raw) {
+                            // Auto-apply extractPrefix if current mapping looks wrong and prefix is available
+                            const looksWrong = !current ||
+                                (current['type'] === 'literal' && !current['value']) ||
+                                (current['type'] === 'path' && current['path'] === fieldKey && prefix);
+                            if (looksWrong && prefix) {
+                                itemMapAfter[fieldKey] = { type: 'extractPrefix', prefix };
+                                console.log(`       ✎  "${fieldKey}" → extractPrefix("${prefix}") (auto-fixed)`);
+                            } else {
+                                console.log(`       ✓  "${fieldKey}" kept: ${currentDesc}`);
+                            }
+                            continue;
+                        }
+                        if (raw.startsWith('prefix:')) {
+                            const p = raw.slice('prefix:'.length);
+                            itemMapAfter[fieldKey] = { type: 'extractPrefix', prefix: p };
+                            console.log(`       ✎  "${fieldKey}" → extractPrefix("${p}")`);
+                        } else {
+                            itemMapAfter[fieldKey] = { type: 'path', path: raw };
+                            console.log(`       ✎  "${fieldKey}" → path("${raw}")`);
+                        }
+                    }
+                }
             }
         }
     }
@@ -1323,7 +1489,7 @@ export async function buildDocxTemplate(docxPath: string, options: { forceAnalyz
 
         // ── Human-in-the-loop review (fresh analysis only) ────────────
         if (!skipReview) {
-            const reviewed = await reviewMapping(mapping);
+            const reviewed = await reviewMapping(mapping, resume as Record<string, unknown>);
             if (JSON.stringify(reviewed) !== JSON.stringify(mapping)) {
                 // Re-patch after review: user may have renamed loopVars, so summaryField,
                 // highlights fixes, etc. need to re-run against the new names.

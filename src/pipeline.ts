@@ -330,7 +330,7 @@ async function runPipeline(
     console.log(`\nTailoring resume (${config.mode})...`);
     let tailored: JsonResume;
     if (config.mode === 'llm') {
-        tailored = await llmTailorResume(baseResume, jobAdText, keywords, seniority, config.llmConfig);
+        tailored = await llmTailorResume(baseResume, jobAdText, keywords, seniority, config.llmConfig, config.templateDocxTplPath);
     } else {
         tailored = programmaticallyTailorResume(baseResume, keywords, seniority);
     }
