@@ -114,7 +114,7 @@ export function buildPrompt(template: string, { baseResume, jobAdText, keywords,
         .replace('{{SENIORITY}}', seniority)
         .replace('{{KEYWORDS}}', keywords.join(', '))
         .replace('{{JOB_AD}}', jobAdText)
-        .replace('{{BASE_RESUME}}', JSON.stringify(baseResume, null, 2));
+        .replace('{{BASE_RESUME}}', JSON.stringify(baseResume));
 }
 
 // ---------------------------------------------------------------------------
@@ -327,6 +327,97 @@ function parseJsonResponse(raw: string): JsonResume {
 }
 
 // ---------------------------------------------------------------------------
+// Work entry selection
+// ---------------------------------------------------------------------------
+
+const MAX_WORK_ENTRIES = 2;
+
+/**
+ * Score a single work entry by counting how many job keywords appear in its
+ * combined text (position, summary, highlights, _tags).
+ */
+function scoreWorkEntry(work: import('./types').ResumeWorkEntry, keywords: string[]): number {
+    const text = [
+        work.position,
+        work.summary ?? '',
+        ...(work.highlights ?? []),
+        ...(work._tags ?? []),
+    ].join(' ').toLowerCase();
+    return keywords.filter(k => text.includes(k.toLowerCase())).length;
+}
+
+/**
+ * Return the top N work entries most relevant to the given keywords.
+ * Original order is preserved among entries with the same score so the most
+ * recent roles are still preferred when scores are tied.
+ */
+function selectTopWorkEntries(
+    work: import('./types').ResumeWorkEntry[],
+    keywords: string[],
+    n: number,
+): import('./types').ResumeWorkEntry[] {
+    if (work.length <= n) return work;
+    const scored = work.map((entry, idx) => ({ entry, score: scoreWorkEntry(entry, keywords), idx }));
+    scored.sort((a, b) => b.score - a.score || a.idx - b.idx);
+    const top = scored.slice(0, n);
+    top.sort((a, b) => a.idx - b.idx); // restore original chronological order
+    return top.map(s => s.entry);
+}
+
+const MAX_PROJECTS = 3;
+
+/**
+ * Build a lean copy of the resume for the LLM prompt:
+ * - Top N projects by keyword relevance, with verbose fields stripped
+ * - Education without the courses list
+ * - Static sections (certs, awards, refs, languages) excluded — re-attached after
+ */
+function slimResumeForPrompt(resume: JsonResume, keywords: string[]): JsonResume {
+    const topProjectNames = resume.projects
+        ? selectTopWorkEntries(
+            resume.projects.map(p => ({
+                name: p.name,
+                position: '',
+                summary: p.description ?? '',
+                highlights: p.highlights ?? [],
+                _tags: p._tags ?? [],
+            })),
+            keywords,
+            MAX_PROJECTS,
+          ).map(s => s.name)
+        : [];
+
+    const slimProjects = resume.projects
+        ?.filter(p => topProjectNames.includes(p.name))
+        .map(p => ({
+            name: p.name,
+            description: p.description,
+            highlights: p.highlights,
+            keywords: p.keywords,
+            startDate: p.startDate,
+            endDate: p.endDate,
+        }));
+
+    const slimEducation = resume.education?.map(e => ({
+        institution: e.institution,
+        area: e.area,
+        studyType: e.studyType,
+        startDate: e.startDate,
+        endDate: e.endDate,
+        score: e.score,
+    }));
+
+    return {
+        basics: resume.basics,
+        work: resume.work,
+        education: slimEducation,
+        skills: resume.skills,
+        projects: slimProjects,
+        // certificates / awards / languages / references excluded — restored post-LLM
+    };
+}
+
+// ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
 
@@ -346,7 +437,24 @@ export async function llmTailorResume(
     const taskLlm = inlineConfig ?? loadConfig();
     const { providerCfg, promptFile, providerName } = resolveProviderConfig(taskLlm);
     const template = loadPromptTemplateFromPath(promptFile);
-    const prompt = buildPrompt(template, { baseResume, jobAdText, keywords, seniority });
+
+    // Trim work entries to the top N most relevant to reduce prompt size.
+    let workForPrompt = baseResume.work ?? [];
+    if (workForPrompt.length > MAX_WORK_ENTRIES) {
+        workForPrompt = selectTopWorkEntries(workForPrompt, keywords, MAX_WORK_ENTRIES);
+        console.log(`       [work-filter] Keeping ${workForPrompt.length}/${baseResume.work!.length} most relevant work entries: ${workForPrompt.map(w => w.name).join(', ')}`);
+    }
+
+    // Build a lean prompt payload (strips verbose project fields, education courses,
+    // and static sections like certs/awards to stay within model token limits).
+    const resumeForPrompt = slimResumeForPrompt({ ...baseResume, work: workForPrompt }, keywords);
+    const promptProjectCount = resumeForPrompt.projects?.length ?? 0;
+    const totalProjectCount = baseResume.projects?.length ?? 0;
+    if (promptProjectCount < totalProjectCount) {
+        console.log(`       [proj-filter] Keeping ${promptProjectCount}/${totalProjectCount} most relevant projects: ${resumeForPrompt.projects?.map(p => p.name).join(', ')}`);
+    }
+
+    const prompt = buildPrompt(template, { baseResume: resumeForPrompt, jobAdText, keywords, seniority });
 
     let rawResponse: string;
     if (providerName === 'openai' || providerName === 'github-copilot') {
@@ -379,6 +487,12 @@ export async function llmTailorResume(
             console.log(`       [post-process] Removed ${removed} fabricated work entr${removed === 1 ? 'y' : 'ies'} not in base resume.`);
         }
     }
+
+    // Re-attach static sections that were excluded from the prompt to save tokens.
+    tailored.certificates = baseResume.certificates;
+    tailored.awards = baseResume.awards;
+    tailored.languages = baseResume.languages;
+    tailored.references = baseResume.references;
 
     return tailored;
 }
